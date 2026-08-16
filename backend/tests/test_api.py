@@ -69,3 +69,79 @@ def test_analyze_event_ollama_down(monkeypatch, seed_event):
     client = TestClient(app)
     resp = client.post(f"/events/{seed_event.id}/analyze")
     assert resp.status_code == 502
+
+
+def _seed_bruteforce_batch(attacker_ip: str, count: int):
+    with Session(engine) as session:
+        for i in range(count):
+            event = NetworkEvent(
+                source_ip="127.0.0.1",
+                raw_message=(
+                    f"Aug 16 00:00:{i:02d} pfsense-prod filterlog: 1,,,{1000000000 + i},em0,"
+                    f"match,block,in,4,0x0,,64,{1000 + i},0,DF,6,tcp,50,"
+                    f"{attacker_ip},192.168.10.5,{40000 + i},22,0,S,1,,65535,,mss"
+                ),
+            )
+            session.add(event)
+        session.commit()
+
+
+def test_correlate_groups_events_by_attacker_ip(monkeypatch):
+    """Un grupo que alcanza el umbral se envía al LLM UNA vez y se marca analizado."""
+    from app import main as main_module
+
+    async def fake_explain_correlated_events(logs: str, count: int):
+        return {
+            "severity": "high",
+            "event_type": "fuerza bruta ssh",
+            "explanation": "patrón de prueba: mismo origen, mismo puerto, repetido",
+            "recommended_action": "bloquear ip",
+        }
+
+    monkeypatch.setattr(main_module, "explain_correlated_events", fake_explain_correlated_events)
+
+    attacker_ip = "203.0.113.77"
+    _seed_bruteforce_batch(attacker_ip, count=6)
+
+    client = TestClient(app)
+    resp = client.post("/events/correlate", params={"window_minutes": 10, "threshold": 5})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["groups_detected"] == 1
+    assert data["groups"][0]["attacker_ip"] == attacker_ip
+    assert data["groups"][0]["event_count"] == 6
+    assert data["groups"][0]["severity"] == "high"
+
+    # Los eventos del grupo deben quedar marcados como analizados.
+    with Session(engine) as session:
+        updated = session.get(NetworkEvent, data["groups"][0]["event_ids"][0])
+        assert updated.analyzed is True
+        assert updated.severity == "high"
+
+
+def test_correlate_ignores_groups_below_threshold(monkeypatch):
+    """Un grupo por debajo del umbral no debe ni siquiera llamar al LLM."""
+    from app import main as main_module
+
+    async def fake_explain_correlated_events(logs: str, count: int):
+        raise AssertionError("no debería llamarse al LLM si no se alcanza el umbral")
+
+    monkeypatch.setattr(main_module, "explain_correlated_events", fake_explain_correlated_events)
+
+    attacker_ip = "203.0.113.88"
+    _seed_bruteforce_batch(attacker_ip, count=2)  # por debajo del default (5)
+
+    client = TestClient(app)
+    resp = client.post("/events/correlate", params={"window_minutes": 10})
+    assert resp.status_code == 200
+    assert resp.json()["groups_detected"] == 0
+
+
+def test_extract_attacker_ip():
+    """La extracción de IP debe leer el campo srcip real, no source_ip del paquete UDP."""
+    from app.main import extract_attacker_ip
+
+    raw = ("Aug 16 00:00:00 pfsense-prod filterlog: 1,,,1000000000,em0,match,block,in,4,"
+           "0x0,,64,1000,0,DF,6,tcp,50,203.0.113.77,192.168.10.5,40000,22,0,S,1,,65535,,mss")
+    assert extract_attacker_ip(raw) == "203.0.113.77"
+    assert extract_attacker_ip("openvpn[1]: Inactivity timeout, restarting") is None
