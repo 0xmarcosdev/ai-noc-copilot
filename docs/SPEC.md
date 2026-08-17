@@ -29,6 +29,7 @@ IA, documentación (este archivo + README + Swagger), testing, demo.
 ## 2. Alcance
 
 ### Dentro del MVP
+
 - Ingesta de syslog UDP (formato filterlog de pfSense, verificado).
 - Almacenamiento en SQLite.
 - Análisis de eventos individuales vía LLM local (severidad, tipo, explicación).
@@ -37,6 +38,7 @@ IA, documentación (este archivo + README + Swagger), testing, demo.
 - Correlación básica de eventos relacionados (en progreso — ver §7).
 
 ### Fuera de alcance (Roadmap, no se construye ahora)
+
 - Multi-sucursal real / múltiples fuentes de syslog simultáneas.
 - RAG sobre documentación interna (runbooks, políticas).
 - ML de anomalías (Isolation Forest) sobre métricas de tráfico.
@@ -48,7 +50,7 @@ IA, documentación (este archivo + README + Swagger), testing, demo.
 
 ## 3. Arquitectura
 
-```
+```text
 pfSense (o generador sintético) --UDP syslog:5514--> syslog_listener.py
                                                             |
                                                             v
@@ -75,7 +77,7 @@ de despliegue del curso; el desarrollo diario corre en venv sin Docker.
 `NetworkEvent` (`backend/app/models.py`):
 
 | Campo | Tipo | Notas |
-|---|---|---|
+| --- | --- | --- |
 | id | int | PK autoincremental |
 | received_at | datetime | timestamp de ingesta |
 | source_ip | str? | IP origen del paquete UDP de syslog |
@@ -93,7 +95,7 @@ post-MVP si se necesita filtrar/agregar por esos campos sin depender del LLM.
 ## 5. Contrato de API
 
 | Método | Ruta | Descripción |
-|---|---|---|
+| --- | --- | --- |
 | GET | `/health` | liveness check |
 | GET | `/events?limit=&only_unanalyzed=` | lista eventos, más recientes primero |
 | POST | `/events/{id}/analyze` | envía el evento al LLM, persiste el resultado |
@@ -118,20 +120,28 @@ devuelve algo no parseable (nunca `500` silencioso — ver `llm_service.py`).
   también `main.py` donde se consume `result["severity"]`, etc.** — es el
   punto de acoplamiento más frágil del proyecto.
 
-## 7. Limitación conocida y en desarrollo: correlación
+## 7. Correlación de eventos (resuelto)
 
-**Confirmado empíricamente (16 ago 2026)**: un evento de bloqueo SSH
-aislado se clasifica como `severity: low` — correcto desde la perspectiva
-de un solo evento, pero insuficiente cuando en realidad son 10 intentos
-seguidos desde distintas IPs al mismo puerto (patrón de fuerza bruta). El
-LLM nunca ve los eventos relacionados porque `/analyze` opera sobre un
-`id` a la vez.
+**Confirmado empíricamente (16 ago 2026)**: un evento de bloqueo SSH aislado
+se clasifica como `severity: low` — correcto para un solo evento, pero
+insuficiente para detectar fuerza bruta (10 intentos desde la misma IP en
+segundos).
 
-**Próximo trabajo**: endpoint que agrupe eventos no analizados por
-`(dstport, dst_ip)` o por `src_ip` dentro de una ventana de tiempo
-(ej. 5-10 min), y si supera un umbral de repeticiones, envíe el lote
-completo al LLM en un solo prompt para que evalúe el patrón, no eventos
-sueltos.
+**Solución implementada**: `POST /events/correlate` agrupa eventos sin
+analizar por IP atacante (extraída del `raw_message` vía regex, no de
+`source_ip` -- ver §4 nota) dentro de una ventana configurable. Si un grupo
+alcanza el umbral (default 5), se envían todos juntos en un solo prompt
+(`correlation_explainer.txt`) para que el LLM evalúe el patrón conjunto.
+
+**Confirmado con datos reales del generador sintético**: 10 eventos aislados
+del mismo origen -> `severity: high`, `event_type: "coordinado"`, explicación
+identificando el patrón correctamente.
+
+**Limitación conocida (documentada, no resuelta)**: si un evento ya fue
+analizado individualmente antes de que se acumule el patrón, `/correlate` no
+lo vuelve a tocar (solo mira eventos sin analizar). Aceptable para el MVP;
+una mejora futura sería permitir "escalar" la severidad de eventos ya
+analizados si luego se detecta que forman parte de un patrón.
 
 ## 8. Decisiones de seguridad / datos
 

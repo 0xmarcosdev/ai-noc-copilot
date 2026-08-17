@@ -3,13 +3,12 @@ import os
 import re
 from collections import defaultdict
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Optional
 
 from dotenv import load_dotenv
 
-load_dotenv()  # carga backend/.env si existe -- evita usar export/set a mano en cada terminal
+load_dotenv()  # carga backend/.env si existe
 
 from fastapi import FastAPI, HTTPException
 from sqlmodel import Session, SQLModel, create_engine, select
@@ -22,17 +21,17 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("ai-noc")
 
 DB_PATH = Path(os.getenv("DB_PATH", "./data/events.db")).resolve()
-DB_PATH.parent.mkdir(parents=True, exist_ok=True)  # SQLite no crea la carpeta contenedora sola
+DB_PATH.parent.mkdir(
+    parents=True, exist_ok=True
+)  # SQLite no crea la carpeta contenedora sola
 SYSLOG_PORT = int(os.getenv("SYSLOG_PORT", "5514"))
 CORRELATION_THRESHOLD = int(os.getenv("CORRELATION_THRESHOLD", "5"))
 
-engine = create_engine(f"sqlite:///{DB_PATH}", connect_args={"check_same_thread": False})
+engine = create_engine(
+    f"sqlite:///{DB_PATH}", connect_args={"check_same_thread": False}
+)
 
 # Extrae la IP origen REAL (el atacante) desde el CSV de filterlog.
-# OJO: NetworkEvent.source_ip es la IP que envió el paquete UDP de syslog
-# (el propio pfSense), NO la IP del atacante -- por eso correlacionamos
-# usando esta extracción del raw_message, no la columna source_ip.
-# Ver SPEC.md §4 y §7.
 FILTERLOG_IPV4_RE = re.compile(
     r"filterlog:\s*\d+,,[^,]*,\d+,[^,]+,\w+,\w+,\w+,4,"
     r"[^,]*,[^,]*,\d+,\d+,\d+,\w+,\d+,\w+,"
@@ -41,7 +40,8 @@ FILTERLOG_IPV4_RE = re.compile(
 )
 
 
-def extract_attacker_ip(raw_message: str) -> Optional[str]:
+# CORRECCIÓN UP045: Usamos `str | None` en lugar de `Optional[str]`
+def extract_attacker_ip(raw_message: str) -> str | None:
     match = FILTERLOG_IPV4_RE.search(raw_message)
     return match.group("srcip") if match else None
 
@@ -65,9 +65,12 @@ def health():
 @app.get("/events")
 def list_events(limit: int = 50, only_unanalyzed: bool = False):
     with Session(engine) as session:
-        query = select(NetworkEvent).order_by(NetworkEvent.received_at.desc()).limit(limit)
+        query = (
+            select(NetworkEvent).order_by(NetworkEvent.received_at.desc()).limit(limit)
+        )
         if only_unanalyzed:
-            query = query.where(NetworkEvent.analyzed == False)  # noqa: E712
+            # CORRECCIÓN RUF100: Eliminado el `# noqa: E712` innecesario
+            query = query.where(NetworkEvent.analyzed == False)
         return session.exec(query).all()
 
 
@@ -99,21 +102,20 @@ async def analyze_event(event_id: int):
 
 
 @app.post("/events/correlate")
-async def correlate_events(window_minutes: int = 10, threshold: int = CORRELATION_THRESHOLD):
+async def correlate_events(
+    window_minutes: int = 10, threshold: int = CORRELATION_THRESHOLD
+):
     """
-    Agrupa eventos SIN ANALIZAR por IP atacante (extraída del raw_message,
-    no de source_ip -- ver comentario junto a extract_attacker_ip) dentro
-    de una ventana de tiempo. Si un grupo alcanza el umbral, se envían
-    todos juntos al LLM en un solo prompt para que evalúe el patrón
-    (ej. fuerza bruta), en vez de analizar cada evento aislado.
-    Resuelve la limitación documentada en SPEC.md §7.
+    Agrupa eventos SIN ANALIZAR por IP atacante dentro de una ventana de tiempo.
     """
-    cutoff = datetime.utcnow() - timedelta(minutes=window_minutes)
+    # CORRECCIÓN DTZ003: Usamos timezone.utc y le quitamos la zona horaria 
+    # con replace(tzinfo=None) para que SQLite/SQLAlchemy no fallen al comparar.
+    cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(minutes=window_minutes)
 
     with Session(engine) as session:
         events = session.exec(
             select(NetworkEvent)
-            .where(NetworkEvent.analyzed == False)  # noqa: E712
+            .where(NetworkEvent.analyzed == False)
             .where(NetworkEvent.received_at >= cutoff)
         ).all()
 
@@ -130,7 +132,9 @@ async def correlate_events(window_minutes: int = 10, threshold: int = CORRELATIO
 
         combined_log = "\n".join(e.raw_message for e in group_events)
         try:
-            result = await explain_correlated_events(combined_log, count=len(group_events))
+            result = await explain_correlated_events(
+                combined_log, count=len(group_events)
+            )
         except LLMAnalysisError as exc:
             logger.error("Fallo al correlacionar grupo %s: %s", attacker_ip, exc)
             continue
@@ -146,14 +150,21 @@ async def correlate_events(window_minutes: int = 10, threshold: int = CORRELATIO
                 session.add(db_event)
             session.commit()
 
-        results.append({
-            "attacker_ip": attacker_ip,
-            "event_count": len(group_events),
-            "event_ids": event_ids,
-            **result,
-        })
+        results.append(
+            {
+                "attacker_ip": attacker_ip,
+                "event_count": len(group_events),
+                "event_ids": event_ids,
+                **result,
+            }
+        )
 
-    return {"window_minutes": window_minutes, "threshold": threshold, "groups_detected": len(results), "groups": results}
+    return {
+        "window_minutes": window_minutes,
+        "threshold": threshold,
+        "groups_detected": len(results),
+        "groups": results,
+    }
 
 
 @app.get("/summary")
@@ -161,7 +172,7 @@ def summary(hours: int = 24):
     """Resumen simple para el chat del dashboard ('¿qué pasó hoy?')."""
     with Session(engine) as session:
         events = session.exec(
-            select(NetworkEvent).where(NetworkEvent.analyzed == True)  # noqa: E712
+            select(NetworkEvent).where(NetworkEvent.analyzed == True)
         ).all()
         by_severity: dict[str, int] = {}
         high_severity_types: dict[str, int] = {}
@@ -169,12 +180,18 @@ def summary(hours: int = 24):
             sev = e.severity or "low"
             by_severity[sev] = by_severity.get(sev, 0) + 1
             if sev == "high" and e.event_type:
-                high_severity_types[e.event_type] = high_severity_types.get(e.event_type, 0) + 1
+                high_severity_types[e.event_type] = (
+                    high_severity_types.get(e.event_type, 0) + 1
+                )
 
-        top_high_categories = sorted(high_severity_types.items(), key=lambda kv: kv[1], reverse=True)[:3]
+        top_high_categories = sorted(
+            high_severity_types.items(), key=lambda kv: kv[1], reverse=True
+        )[:3]
 
         return {
             "total_analyzed": len(events),
             "by_severity": by_severity,
-            "top_high_severity_types": [{"event_type": t, "count": c} for t, c in top_high_categories],
+            "top_high_severity_types": [
+                {"event_type": t, "count": c} for t, c in top_high_categories
+            ],
         }

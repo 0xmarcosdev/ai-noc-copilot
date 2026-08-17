@@ -71,52 +71,58 @@ def test_analyze_event_ollama_down(monkeypatch, seed_event):
     assert resp.status_code == 502
 
 
-def _seed_bruteforce_batch(attacker_ip: str, count: int):
-    with Session(engine) as session:
-        for i in range(count):
-            event = NetworkEvent(
-                source_ip="127.0.0.1",
-                raw_message=(
-                    f"Aug 16 00:00:{i:02d} pfsense-prod filterlog: 1,,,{1000000000 + i},em0,"
-                    f"match,block,in,4,0x0,,64,{1000 + i},0,DF,6,tcp,50,"
-                    f"{attacker_ip},192.168.10.5,{40000 + i},22,0,S,1,,65535,,mss"
-                ),
-            )
-            session.add(event)
-        session.commit()
+def _raw_message_with_attacker_ip(ip: str, tag: int) -> str:
+    return (
+        f"Aug 16 00:00:{tag:02d} pfsense-prod filterlog: 1,,,10000000{tag:02d},em0,match,block,in,4,"
+        f"0x0,,64,{tag},0,DF,6,tcp,60,{ip},192.168.10.5,4000{tag},22,0,S,1,,65535,,mss;nop;wscale"
+    )
 
 
-def test_correlate_groups_events_by_attacker_ip(monkeypatch):
-    """Un grupo que alcanza el umbral se envía al LLM UNA vez y se marca analizado."""
+def test_correlate_groups_by_attacker_ip(monkeypatch):
+    """Varios eventos de la misma IP atacante dentro de la ventana -> un solo grupo, severity alta."""
     from app import main as main_module
 
     async def fake_explain_correlated_events(logs: str, count: int):
         return {
             "severity": "high",
-            "event_type": "fuerza bruta ssh",
-            "explanation": "patrón de prueba: mismo origen, mismo puerto, repetido",
-            "recommended_action": "bloquear ip",
+            "event_type": "fuerza bruta SSH",
+            "explanation": "Multiples intentos desde la misma IP en poco tiempo.",
+            "recommended_action": "Bloquear la IP origen.",
         }
 
     monkeypatch.setattr(main_module, "explain_correlated_events", fake_explain_correlated_events)
 
-    attacker_ip = "203.0.113.77"
-    _seed_bruteforce_batch(attacker_ip, count=6)
+    with Session(engine) as session:
+        for i in range(6):
+            session.add(NetworkEvent(
+                source_ip="192.0.2.1",
+                raw_message=_raw_message_with_attacker_ip("203.0.113.200", i),
+            ))
+        session.commit()
 
     client = TestClient(app)
     resp = client.post("/events/correlate", params={"window_minutes": 10, "threshold": 5})
     assert resp.status_code == 200
     data = resp.json()
     assert data["groups_detected"] == 1
-    assert data["groups"][0]["attacker_ip"] == attacker_ip
+    assert data["groups"][0]["attacker_ip"] == "203.0.113.200"
     assert data["groups"][0]["event_count"] == 6
     assert data["groups"][0]["severity"] == "high"
 
-    # Los eventos del grupo deben quedar marcados como analizados.
+
+def test_correlate_below_threshold_returns_no_groups():
+    """Un solo evento no alcanza el umbral -> no se marca ningun grupo."""
     with Session(engine) as session:
-        updated = session.get(NetworkEvent, data["groups"][0]["event_ids"][0])
-        assert updated.analyzed is True
-        assert updated.severity == "high"
+        session.add(NetworkEvent(
+            source_ip="192.0.2.1",
+            raw_message=_raw_message_with_attacker_ip("198.51.100.9", 0),
+        ))
+        session.commit()
+
+    client = TestClient(app)
+    resp = client.post("/events/correlate", params={"window_minutes": 10, "threshold": 5})
+    assert resp.status_code == 200
+    assert resp.json()["groups_detected"] == 0
 
 
 def test_correlate_ignores_groups_below_threshold(monkeypatch):
@@ -128,8 +134,13 @@ def test_correlate_ignores_groups_below_threshold(monkeypatch):
 
     monkeypatch.setattr(main_module, "explain_correlated_events", fake_explain_correlated_events)
 
-    attacker_ip = "203.0.113.88"
-    _seed_bruteforce_batch(attacker_ip, count=2)  # por debajo del default (5)
+    with Session(engine) as session:
+        for i in range(2):  # por debajo del default (5)
+            session.add(NetworkEvent(
+                source_ip="192.0.2.1",
+                raw_message=_raw_message_with_attacker_ip("203.0.113.88", i),
+            ))
+        session.commit()
 
     client = TestClient(app)
     resp = client.post("/events/correlate", params={"window_minutes": 10})

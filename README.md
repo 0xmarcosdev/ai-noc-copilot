@@ -7,11 +7,20 @@ corporativa (diseñado para entornos air-gapped).
 
 > Proyecto final — curso "IA Estratégica: El Programador Aumentado".
 > Validado contra un pfSense real de laboratorio (Proxmox). Diseñado para
-> escalar a arquitectura multi-sucursal (ver [Roadmap](#roadmap)).
+> escalar a arquitectura multi-sucursal (ver [Roadmap](#roadmap-fuera-del-alcance-del-mvp)).
+
+## Documentación del proyecto
+
+Este README es el punto de entrada. El resto de la documentación vive en el repo, no en una Wiki separada:
+
+- **[`docs/SPEC.md`](docs/SPEC.md)** — arquitectura, decisiones de diseño, contratos de API/LLM. La fuente de verdad técnica.
+- **[`ROADMAP.md`](ROADMAP.md)** — checklist de fases, qué está hecho y qué sigue, convención de versiones.
+- **[`DEVLOG.md`](DEVLOG.md)** — diario de sesiones: qué se hizo, con qué asistente de IA, por qué.
+- **[`docs/pfsense-filterlog-format.md`](docs/pfsense-filterlog-format.md)** — formato de log verificado contra fuentes oficiales.
 
 ## Arquitectura
 
-```
+```text
 pfSense (syslog UDP) ──▶ backend/syslog_listener.py ──▶ SQLite
                                                             │
                                               GET /events   │  POST /events/{id}/analyze
@@ -29,13 +38,16 @@ pfSense (syslog UDP) ──▶ backend/syslog_listener.py ──▶ SQLite
 ### Datos de prueba (sin pfSense real disponible)
 
 ```bash
-python scripts/generate_fake_logs.py --count 15
+python scripts/generate_fake_logs.py --scenario normal --count 15
+python scripts/generate_fake_logs.py --scenario bruteforce --count 10
+python scripts/generate_fake_logs.py --scenario portscan --count 10
 ```
 
-Envía logs sintéticos con formato aproximado de pfSense al listener local.
-Útil para desarrollar y probar el pipeline completo sin depender de un
-pfSense de laboratorio o de producción. El formato exacto de `filterlog`
-está pendiente de verificación contra la wiki oficial (ver `docs/`).
+Envía logs sintéticos con formato **real y verificado** de `filterlog` de
+pfSense al listener local (ver `docs/pfsense-filterlog-format.md` para las
+fuentes: gramática BNF oficial + código fuente de pfSense). Los escenarios
+`bruteforce` y `portscan` generan patrones reconocibles útiles para probar
+que el LLM los clasifica como severidad alta.
 
 ## Cómo correrlo
 
@@ -58,6 +70,7 @@ uvicorn app.main:app --reload
 ```
 
 En otra terminal:
+
 ```bash
 cd frontend
 pip install streamlit httpx
@@ -73,8 +86,9 @@ docker compose up -d
 ```
 
 En ambos casos:
-- Dashboard: http://localhost:8501
-- API docs (Swagger): http://localhost:8000/docs
+
+- Dashboard: <http://localhost:8501>
+- API docs (Swagger): <http://localhost:8000/docs>
 - Configurar pfSense: *Status > System Logs > Settings > Remote Log Servers*
   → apuntar a `<IP de tu equipo>:5514` (UDP).
 

@@ -18,7 +18,7 @@ import argparse
 import random
 import socket
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 
 INTERFACES = ["igb0", "igb1", "em0"]
 
@@ -96,9 +96,9 @@ SCENARIOS = {
 }
 
 
-def build_message(scenario: str, attacker_ip: str = None) -> str:
+def build_message(scenario: str, attacker_ip: str | None) -> str:
     body = SCENARIOS[scenario](attacker_ip)
-    timestamp = datetime.now().strftime("%b %d %H:%M:%S")
+    timestamp = datetime.now(timezone.utc).strftime("%b %d %H:%M:%S")
     return f"{timestamp} pfsense-prod {body}"
 
 

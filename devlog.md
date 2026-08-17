@@ -1,6 +1,7 @@
 # DEVLOG
 
 ## Día 1 — 10 ago 2026
+
 - Definido el alcance del MVP (AI-NOC Copilot) tras evaluar y descartar 7 propuestas
   sobredimensionadas para el hardware y el tiempo disponibles.
 - Generado el esqueleto del proyecto: FastAPI + SQLModel + SQLite, listener syslog UDP,
@@ -11,6 +12,7 @@
 - Tests iniciales (pytest) pasando en 4/4.
 
 ## Día 2 — 11-12 ago 2026
+
 - Confirmado: no hay pfSense de laboratorio disponible; los pfSense reales están en
   producción. Decisión: usar datos sintéticos para desarrollo, evaluar acceso a
   producción más adelante por una vía segura (muestra histórica sanitizada, no
@@ -29,6 +31,7 @@
   a mano en cada sesión de terminal en Windows.
 
 ## Día 3 — 15-16 ago 2026
+
 - Generados 10 eventos sintéticos de escenario "bruteforce" (mismo puerto 22,
   IPs origen distintas) para probar cómo clasifica el LLM un patrón de ataque.
 - Detectado un problema de entorno: nuevo venv creado sobre Python 3.14 rompe
@@ -52,3 +55,15 @@
 - Creado docs/SPEC.md como documento de referencia único para desarrollo
   guiado por especificación (spec-driven development) y como contexto
   reutilizable para delegar tareas a otras herramientas de IA.
+
+## Día 4 -16 ago 2026
+
+- Confirmado que un evento aislado de fuerza bruta se clasificaba como severity: low — la limitación que ya esperábamos.
+- Construída la corrección: endpoint POST /events/correlate, que agrupa eventos por IP atacante real (no por source_ip) y los manda juntos al LLM.
+Creado documento de seguimiento — creamos ROADMAP.md (checklist de fases + versionado vMAJOR.MINOR.PATCH).
+- Probado /correlate — dio groups_detected: 0. Encontramos el motivo: el generador de logs sintéticos usaba una IP atacante distinta en cada evento, así que nunca se agrupaban 5+ del mismo origen.
+- Creado scripts/ensure_ollama.bat para levantar Ollama.
+- Prueba repetida: funcionó — 10 eventos agrupados, severity: high, patrón identificado correctamente.
+- Agregados tests para el endpoint de correlación, limpié unos duplicados que habían quedado en el archivo de tests.
+- Actualizados ROADMAP.md y SPEC.md marcando la Fase 4 como completa.
+- Botón de correlación en el dashboard de Streamlit (Fase 5) — pero no llegué a dártelo, ahí es donde se cortó.
