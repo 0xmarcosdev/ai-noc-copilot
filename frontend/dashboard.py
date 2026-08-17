@@ -3,7 +3,7 @@ import os
 import httpx
 import streamlit as st
 
-BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
+BACKEND_URL = os.getenv("BACKEND_URL", "http://127.0.0.1:8000")
 
 st.set_page_config(page_title="AI-NOC Copilot", layout="wide")
 st.title("🛰️ AI-NOC Copilot")
@@ -15,7 +15,7 @@ with col2:
     st.subheader("Resumen")
     summary_data = None
     try:
-        summary_data = httpx.get(f"{BACKEND_URL}/summary", timeout=5).json()
+        summary_data = httpx.get(f"{BACKEND_URL}/summary", timeout=5, trust_env=False).json()
         st.metric("Eventos analizados", summary_data["total_analyzed"])
         for sev, count in summary_data.get("by_severity", {}).items():
             st.write(f"**{sev}**: {count}")
@@ -38,6 +38,7 @@ with col2:
                     f"{BACKEND_URL}/events/correlate",
                     params={"window_minutes": 10, "threshold": 5},
                     timeout=90,
+                    trust_env=False,
                 )
                 resp.raise_for_status()
                 correlation = resp.json()
@@ -66,6 +67,7 @@ with col1:
             f"{BACKEND_URL}/events",
             params={"only_unanalyzed": only_new},
             timeout=5,
+            trust_env=False,
         ).json()
     except httpx.HTTPError:
         events = []
@@ -84,6 +86,7 @@ with col1:
                         resp = httpx.post(
                             f"{BACKEND_URL}/events/{event['id']}/analyze",
                             timeout=90,
+                            trust_env=False,
                         )
                     if resp.status_code == 200:
                         st.rerun()
