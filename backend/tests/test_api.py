@@ -6,7 +6,6 @@ Tests mínimos para cumplir el requisito de testing del curso:
 
 Correr con: pytest backend/tests -v
 """
-
 import os
 import tempfile
 
@@ -20,11 +19,10 @@ if os.path.exists(_TEST_DB_PATH):
     os.remove(_TEST_DB_PATH)
 
 import pytest
-from fastapi.testclient import TestClient
-from sqlmodel import Session, SQLModel
-
 from app.main import app, engine
 from app.models import NetworkEvent
+from fastapi.testclient import TestClient
+from sqlmodel import Session, SQLModel
 
 SQLModel.metadata.create_all(engine)
 
@@ -70,7 +68,6 @@ def test_analyze_event_ollama_down(monkeypatch, seed_event):
 
     async def fake_explain_event(log_raw: str):
         from app.llm_service import LLMAnalysisError
-
         raise LLMAnalysisError("Ollama no respondió (simulado en test)")
 
     monkeypatch.setattr(main_module, "explain_event", fake_explain_event)
@@ -99,24 +96,18 @@ def test_correlate_groups_by_attacker_ip(monkeypatch):
             "recommended_action": "Bloquear la IP origen.",
         }
 
-    monkeypatch.setattr(
-        main_module, "explain_correlated_events", fake_explain_correlated_events
-    )
+    monkeypatch.setattr(main_module, "explain_correlated_events", fake_explain_correlated_events)
 
     with Session(engine) as session:
         for i in range(6):
-            session.add(
-                NetworkEvent(
-                    source_ip="192.0.2.1",
-                    raw_message=_raw_message_with_attacker_ip("203.0.113.200", i),
-                )
-            )
+            session.add(NetworkEvent(
+                source_ip="192.0.2.1",
+                raw_message=_raw_message_with_attacker_ip("203.0.113.200", i),
+            ))
         session.commit()
 
     client = TestClient(app)
-    resp = client.post(
-        "/events/correlate", params={"window_minutes": 10, "threshold": 5}
-    )
+    resp = client.post("/events/correlate", params={"window_minutes": 10, "threshold": 5})
     assert resp.status_code == 200
     data = resp.json()
     assert data["groups_detected"] == 1
@@ -128,18 +119,14 @@ def test_correlate_groups_by_attacker_ip(monkeypatch):
 def test_correlate_below_threshold_returns_no_groups():
     """Un solo evento no alcanza el umbral -> no se marca ningun grupo."""
     with Session(engine) as session:
-        session.add(
-            NetworkEvent(
-                source_ip="192.0.2.1",
-                raw_message=_raw_message_with_attacker_ip("198.51.100.9", 0),
-            )
-        )
+        session.add(NetworkEvent(
+            source_ip="192.0.2.1",
+            raw_message=_raw_message_with_attacker_ip("198.51.100.9", 0),
+        ))
         session.commit()
 
     client = TestClient(app)
-    resp = client.post(
-        "/events/correlate", params={"window_minutes": 10, "threshold": 5}
-    )
+    resp = client.post("/events/correlate", params={"window_minutes": 10, "threshold": 5})
     assert resp.status_code == 200
     assert resp.json()["groups_detected"] == 0
 
@@ -151,18 +138,14 @@ def test_correlate_ignores_groups_below_threshold(monkeypatch):
     async def fake_explain_correlated_events(logs: str, count: int):
         raise AssertionError("no debería llamarse al LLM si no se alcanza el umbral")
 
-    monkeypatch.setattr(
-        main_module, "explain_correlated_events", fake_explain_correlated_events
-    )
+    monkeypatch.setattr(main_module, "explain_correlated_events", fake_explain_correlated_events)
 
     with Session(engine) as session:
         for i in range(2):  # por debajo del default (5)
-            session.add(
-                NetworkEvent(
-                    source_ip="192.0.2.1",
-                    raw_message=_raw_message_with_attacker_ip("203.0.113.88", i),
-                )
-            )
+            session.add(NetworkEvent(
+                source_ip="192.0.2.1",
+                raw_message=_raw_message_with_attacker_ip("203.0.113.88", i),
+            ))
         session.commit()
 
     client = TestClient(app)
@@ -175,10 +158,8 @@ def test_extract_attacker_ip():
     """La extracción de IP debe leer el campo srcip real, no source_ip del paquete UDP."""
     from app.main import extract_attacker_ip
 
-    raw = (
-        "Aug 16 00:00:00 pfsense-prod filterlog: 1,,,1000000000,em0,match,block,in,4,"
-        "0x0,,64,1000,0,DF,6,tcp,50,203.0.113.77,192.168.10.5,40000,22,0,S,1,,65535,,mss"
-    )
+    raw = ("Aug 16 00:00:00 pfsense-prod filterlog: 1,,,1000000000,em0,match,block,in,4,"
+           "0x0,,64,1000,0,DF,6,tcp,50,203.0.113.77,192.168.10.5,40000,22,0,S,1,,65535,,mss")
     assert extract_attacker_ip(raw) == "203.0.113.77"
     assert extract_attacker_ip("openvpn[1]: Inactivity timeout, restarting") is None
 
@@ -192,8 +173,9 @@ def _pass_out_message(src: str, dst: str, dport: int, tag: int) -> str:
 
 def test_detect_beaconing_flags_regular_interval(monkeypatch):
     """Eventos muy regulares en el tiempo -> se detectan como posible beaconing."""
-    from app import main as main_module
     from datetime import datetime, timedelta
+
+    from app import main as main_module
 
     async def fake_explain_correlated_events(logs: str, count: int):
         return {
@@ -203,9 +185,7 @@ def test_detect_beaconing_flags_regular_interval(monkeypatch):
             "recommended_action": "Aislar el host y analizar el proceso responsable.",
         }
 
-    monkeypatch.setattr(
-        main_module, "explain_correlated_events", fake_explain_correlated_events
-    )
+    monkeypatch.setattr(main_module, "explain_correlated_events", fake_explain_correlated_events)
 
     base = datetime.utcnow()
     with Session(engine) as session:
@@ -217,16 +197,12 @@ def test_detect_beaconing_flags_regular_interval(monkeypatch):
             session.add(event)
             session.commit()
             session.refresh(event)
-            event.received_at = base + timedelta(
-                seconds=30 * i
-            )  # intervalo perfectamente regular
+            event.received_at = base + timedelta(seconds=30 * i)  # intervalo perfectamente regular
             session.add(event)
             session.commit()
 
     client = TestClient(app)
-    resp = client.post(
-        "/events/detect-beaconing", params={"window_minutes": 60, "min_occurrences": 5}
-    )
+    resp = client.post("/events/detect-beaconing", params={"window_minutes": 60, "min_occurrences": 5})
     assert resp.status_code == 200
     data = resp.json()
     assert data["groups_detected"] == 1
@@ -254,9 +230,7 @@ def test_detect_beaconing_ignores_irregular_interval():
             session.commit()
 
     client = TestClient(app)
-    resp = client.post(
-        "/events/detect-beaconing", params={"window_minutes": 60, "min_occurrences": 5}
-    )
+    resp = client.post("/events/detect-beaconing", params={"window_minutes": 60, "min_occurrences": 5})
     assert resp.status_code == 200
     assert resp.json()["groups_detected"] == 0
 
@@ -268,11 +242,7 @@ def test_extract_dns_query_unbound_and_dnsmasq():
     dnsmasq = "Dec  3 08:51:27 dnsmasq[1068]: query[A] daisy.ubuntu.com from 192.0.2.5"
 
     r1 = extract_dns_query(unbound)
-    assert r1 == {
-        "client_ip": "192.168.1.100",
-        "domain": "daisy.ubuntu.com",
-        "qtype": "A",
-    }
+    assert r1 == {"client_ip": "192.168.1.100", "domain": "daisy.ubuntu.com", "qtype": "A"}
 
     r2 = extract_dns_query(dnsmasq)
     assert r2 == {"client_ip": "192.0.2.5", "domain": "daisy.ubuntu.com", "qtype": "A"}
@@ -304,31 +274,22 @@ def test_detect_suspicious_dns_flags_multiple_dga_domains(monkeypatch):
             "recommended_action": "Aislar el host y revisar procesos.",
         }
 
-    monkeypatch.setattr(
-        main_module, "explain_correlated_events", fake_explain_correlated_events
-    )
+    monkeypatch.setattr(main_module, "explain_correlated_events", fake_explain_correlated_events)
 
     dga_domains = [
-        "kj3h9fkj2h7glabc9wq.top",
-        "9zxpq7fmvbn3hslk2ab.xyz",
-        "a8k2j9h6g5f4d3s2a1z.info",
-        "mm3n2b1v9c8x7z6a5s4.biz",
+        "kj3h9fkj2h7glabc9wq.top", "9zxpq7fmvbn3hslk2ab.xyz",
+        "a8k2j9h6g5f4d3s2a1z.info", "mm3n2b1v9c8x7z6a5s4.biz",
     ]
     with Session(engine) as session:
         for i, domain in enumerate(dga_domains):
-            session.add(
-                NetworkEvent(
-                    source_ip="192.168.10.22",
-                    raw_message=_dns_dga_message("192.168.10.22", domain, i),
-                )
-            )
+            session.add(NetworkEvent(
+                source_ip="192.168.10.22",
+                raw_message=_dns_dga_message("192.168.10.22", domain, i),
+            ))
         session.commit()
 
     client = TestClient(app)
-    resp = client.post(
-        "/events/detect-suspicious-dns",
-        params={"window_minutes": 30, "min_distinct_domains": 3},
-    )
+    resp = client.post("/events/detect-suspicious-dns", params={"window_minutes": 30, "min_distinct_domains": 3})
     assert resp.status_code == 200
     data = resp.json()
     assert data["groups_detected"] == 1
@@ -339,18 +300,13 @@ def test_detect_suspicious_dns_flags_multiple_dga_domains(monkeypatch):
 def test_detect_suspicious_dns_ignores_legit_domains():
     with Session(engine) as session:
         for i, domain in enumerate(["google.com", "microsoft.com", "github.com"]):
-            session.add(
-                NetworkEvent(
-                    source_ip="192.168.10.40",
-                    raw_message=_dns_dga_message("192.168.10.40", domain, i),
-                )
-            )
+            session.add(NetworkEvent(
+                source_ip="192.168.10.40",
+                raw_message=_dns_dga_message("192.168.10.40", domain, i),
+            ))
         session.commit()
 
     client = TestClient(app)
-    resp = client.post(
-        "/events/detect-suspicious-dns",
-        params={"window_minutes": 30, "min_distinct_domains": 3},
-    )
+    resp = client.post("/events/detect-suspicious-dns", params={"window_minutes": 30, "min_distinct_domains": 3})
     assert resp.status_code == 200
     assert resp.json()["groups_detected"] == 0

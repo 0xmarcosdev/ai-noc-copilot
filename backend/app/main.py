@@ -5,7 +5,6 @@ from collections import defaultdict
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Optional
 
 from dotenv import load_dotenv
 
@@ -43,7 +42,7 @@ FILTERLOG_IPV4_RE = re.compile(
 )
 
 
-def extract_attacker_ip(raw_message: str) -> Optional[str]:
+def extract_attacker_ip(raw_message: str) -> str | None:
     match = FILTERLOG_IPV4_RE.search(raw_message)
     return match.group("srcip") if match else None
 
@@ -60,7 +59,7 @@ FILTERLOG_CONNECTION_RE = re.compile(
 )
 
 
-def extract_connection_summary(raw_message: str) -> Optional[dict]:
+def extract_connection_summary(raw_message: str) -> dict | None:
     match = FILTERLOG_CONNECTION_RE.search(raw_message)
     return match.groupdict() if match else None
 
@@ -86,7 +85,7 @@ def list_events(limit: int = 50, only_unanalyzed: bool = False):
     with Session(engine) as session:
         query = select(NetworkEvent).order_by(NetworkEvent.received_at.desc()).limit(limit)
         if only_unanalyzed:
-            query = query.where(NetworkEvent.analyzed == False)  # noqa: E712
+            query = query.where(NetworkEvent.analyzed == False)
         return session.exec(query).all()
 
 
@@ -132,7 +131,7 @@ async def correlate_events(window_minutes: int = 10, threshold: int = CORRELATIO
     with Session(engine) as session:
         events = session.exec(
             select(NetworkEvent)
-            .where(NetworkEvent.analyzed == False)  # noqa: E712
+            .where(NetworkEvent.analyzed == False)
             .where(NetworkEvent.received_at >= cutoff)
         ).all()
 
@@ -196,7 +195,7 @@ async def detect_beaconing(window_minutes: int = 60, min_occurrences: int = 5, m
     with Session(engine) as session:
         events = session.exec(
             select(NetworkEvent)
-            .where(NetworkEvent.analyzed == False)  # noqa: E712
+            .where(NetworkEvent.analyzed == False)
             .where(NetworkEvent.received_at >= cutoff)
         ).all()
 
@@ -283,7 +282,7 @@ async def detect_suspicious_dns(window_minutes: int = 30, min_distinct_domains: 
     with Session(engine) as session:
         events = session.exec(
             select(NetworkEvent)
-            .where(NetworkEvent.analyzed == False)  # noqa: E712
+            .where(NetworkEvent.analyzed == False)
             .where(NetworkEvent.received_at >= cutoff)
         ).all()
 
@@ -342,7 +341,7 @@ def summary(hours: int = 24):
     """Resumen simple para el chat del dashboard ('¿qué pasó hoy?')."""
     with Session(engine) as session:
         events = session.exec(
-            select(NetworkEvent).where(NetworkEvent.analyzed == True)  # noqa: E712
+            select(NetworkEvent).where(NetworkEvent.analyzed == True)
         ).all()
         by_severity: dict[str, int] = {}
         high_severity_types: dict[str, int] = {}

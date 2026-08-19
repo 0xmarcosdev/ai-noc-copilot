@@ -152,7 +152,7 @@ SCENARIOS = {
 }
 
 
-def build_message(scenario: str, attacker_ip: str = None) -> str:
+def build_message(scenario: str, attacker_ip: str | None = None) -> str:
     body = SCENARIOS[scenario](attacker_ip)
     timestamp = datetime.now().strftime("%b %d %H:%M:%S")
     return f"{timestamp} pfsense-prod {body}"

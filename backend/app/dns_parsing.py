@@ -12,7 +12,6 @@ Unbound:  "unbound[96103]: [96103:0] info: 192.168.1.100 daisy.ubuntu.com. A IN"
 dnsmasq:  "dnsmasq[1068]: query[A] daisy.ubuntu.com from 192.0.2.5"
 """
 import re
-from typing import Optional
 
 UNBOUND_DNS_RE = re.compile(
     r"unbound(?:\[\d+\])?:\s*\[\d+:\d+\]\s+info:\s+"
@@ -26,7 +25,7 @@ DNSMASQ_DNS_RE = re.compile(
 )
 
 
-def extract_dns_query(raw_message: str) -> Optional[dict]:
+def extract_dns_query(raw_message: str) -> dict | None:
     """
     Devuelve {"client_ip": ..., "domain": ..., "qtype": ...} si la línea
     es una consulta DNS reconocible (Unbound o dnsmasq), o None si no lo es

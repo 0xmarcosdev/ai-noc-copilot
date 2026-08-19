@@ -1,0 +1,18 @@
+[tool.ruff]
+line-length = 110
+
+[tool.ruff.lint]
+ignore = [
+    # DTZ003/DTZ005: datetime.utcnow()/datetime.now() sin tz-aware.
+    # Decision consciente (17 ago 2026): todo el proyecto usa datetimes
+    # "naive" en UTC de forma consistente en todo el codebase (modelo,
+    # endpoints, tests, generador de logs). Migrar a tz-aware tocaría la
+    # comparacion de ventanas de tiempo en /correlate, /detect-beaconing
+    # y /detect-suspicious-dns -- la logica mas delicada del proyecto --
+    # con riesgo real de inconsistencias sutiles entre SQLite/SQLAlchemy
+    # al leer/escribir datetimes aware vs naive. No vale el riesgo cerca
+    # de la fecha de entrega para una advertencia de estilo que no afecta
+    # el funcionamiento actual. Ver DEVLOG.md.
+    "DTZ003",
+    "DTZ005",
+]
