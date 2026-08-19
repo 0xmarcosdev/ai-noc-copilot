@@ -17,8 +17,9 @@ Uso:
 import argparse
 import random
 import socket
+import string
 import time
-from datetime import datetime, timezone
+from datetime import datetime
 
 INTERFACES = ["igb0", "igb1", "em0"]
 
@@ -89,16 +90,71 @@ def scenario_portscan(attacker_ip=None):
                            dst=target, dport=dport, flags="S")
 
 
+def scenario_beacon(attacker_ip=None):
+    """
+    Conexion saliente PERMITIDA (pass, out) de un host interno hacia un
+    mismo destino externo fijo, repetida -- simula "phoning home" de
+    malware llamando a su C2. Usa 192.0.2.0/24 (TEST-NET-1, RFC 5737),
+    no una IP real.
+    """
+    external_c2 = attacker_ip or f"192.0.2.{random.randint(2, 250)}"
+    internal_host = "192.168.10.15"
+    return build_tcp_line(action="pass", direction="out", src=internal_host,
+                           dst=external_c2, dport=443, flags="S")
+
+
+def _random_dga_domain() -> str:
+    """Genera un dominio de aspecto pseudoaleatorio, como los de malware DGA real."""
+    length = random.randint(14, 20)  # cadenas cortas dan una entropía poco confiable
+    charset = string.ascii_lowercase + string.digits
+    chars = "".join(random.choice(charset) for _ in range(length))
+    tld = random.choice(["top", "xyz", "info", "biz"])
+    return f"{chars}.{tld}"
+
+
+LEGIT_DOMAINS = [
+    "google.com", "microsoft.com", "windowsupdate.com", "cloudflare.com",
+    "amazon.com", "office365.com", "github.com", "ubuntu.com",
+]
+
+
+def scenario_dns_dga(attacker_ip=None):
+    """
+    Host interno consultando un dominio de alta entropía distinto cada
+    vez -- simula malware DGA "probando" dominios de C2 (formato dnsmasq,
+    verificado con Perplexity contra la documentacion oficial de pfSense).
+    """
+    client_ip = attacker_ip or "192.168.10.22"
+    domain = _random_dga_domain()
+    return f"dnsmasq[1068]: query[A] {domain} from {client_ip}"
+
+
+def scenario_dns_normal(attacker_ip=None):
+    """Consultas DNS normales -- para probar que la heurística NO las marca como sospechosas."""
+    client_ip = attacker_ip or f"192.168.10.{random.randint(20, 60)}"
+    domain = random.choice(LEGIT_DOMAINS)
+    return f"dnsmasq[1068]: query[A] {domain} from {client_ip}"
+
+
+def scenario_vpn_flapping(attacker_ip=None):
+    """Túnel VPN cayendo y reconectando repetidamente -- enlace inestable o posible ataque a la VPN."""
+    return "openvpn[12345]: Inactivity timeout (--ping-restart), restarting"
+
+
 SCENARIOS = {
     "normal": scenario_normal,
     "bruteforce": scenario_bruteforce,
     "portscan": scenario_portscan,
+    "beacon": scenario_beacon,
+    "dns_dga": scenario_dns_dga,
+    "dns_normal": scenario_dns_normal,
+    "vpn_flapping": scenario_vpn_flapping,
 }
 
 
-def build_message(scenario: str, attacker_ip: str | None) -> str:
+def build_message(scenario: str, attacker_ip: str = None) -> str:
     body = SCENARIOS[scenario](attacker_ip)
-    timestamp = datetime.now(timezone.utc).strftime("%b %d %H:%M:%S")
+    timestamp = datetime.now().strftime("%b %d %H:%M:%S")
     return f"{timestamp} pfsense-prod {body}"
 
 
@@ -109,7 +165,7 @@ def main():
     parser.add_argument("--count", type=int, default=10)
     parser.add_argument("--interval", type=float, default=0.5)
     parser.add_argument("--scenario", choices=list(SCENARIOS.keys()), default="normal",
-                         help="normal = mezcla variada | bruteforce = SSH brute-force | portscan = escaneo de puertos")
+                         help="normal | bruteforce | portscan | beacon | dns_dga | dns_normal | vpn_flapping")
     args = parser.parse_args()
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -121,6 +177,13 @@ def main():
     elif args.scenario == "portscan":
         fixed_ip = f"198.51.100.{random.randint(2, 250)}"
         print(f"IP atacante fija para este lote: {fixed_ip}\n")
+    elif args.scenario == "beacon":
+        fixed_ip = f"192.0.2.{random.randint(2, 250)}"
+        print(f"IP de C2 externa fija para este lote: {fixed_ip}\n")
+        print("Nota: usa --interval igual o similar entre eventos para simular regularidad.\n")
+    elif args.scenario == "dns_dga":
+        fixed_ip = f"192.168.10.{random.randint(20, 60)}"
+        print(f"Host interno (infectado) fijo para este lote: {fixed_ip}\n")
 
     for i in range(args.count):
         message = build_message(args.scenario, attacker_ip=fixed_ip)

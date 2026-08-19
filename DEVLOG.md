@@ -67,3 +67,8 @@ Creado documento de seguimiento — creamos ROADMAP.md (checklist de fases + ver
 - Agregados tests para el endpoint de correlación, limpié unos duplicados que habían quedado en el archivo de tests.
 - Actualizados ROADMAP.md y SPEC.md marcando la Fase 4 como completa.
 - Botón de correlación en el dashboard de Streamlit (Fase 5) — pero no llegué a dártelo, ahí es donde se cortó.
+
+## Día 5 19 ago 2026
+
+- Resolvimos el conflicto de dependencias: Fijamos versiones compatibles de FastAPI, Starlette y Streamlit. (pip install "fastapi==0.115.0" "starlette==0.38.6" "streamlit==1.39.0")
+- Automatizamos el inicio del frontend y el backend mediante scripts. (Creando un archivo llamado .env dentro de D:\AiProject\ai-noc-copilot\frontend\ con contenido: BACKEND_URL=<http://localhost:8000>, y los cripts start-backend.ps1, start-frontend.ps1 y start-all.ps1)

@@ -3,16 +3,19 @@ import os
 import re
 from collections import defaultdict
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Optional
 
 from dotenv import load_dotenv
 
-load_dotenv()  # carga backend/.env si existe
+load_dotenv()  # carga backend/.env si existe -- evita usar export/set a mano en cada terminal
 
 from fastapi import FastAPI, HTTPException
 from sqlmodel import Session, SQLModel, create_engine, select
 
+from app.dns_heuristics import looks_like_dga
+from app.dns_parsing import extract_dns_query
 from app.llm_service import LLMAnalysisError, explain_correlated_events, explain_event
 from app.models import NetworkEvent
 from app.syslog_listener import start_syslog_listener
@@ -21,17 +24,17 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("ai-noc")
 
 DB_PATH = Path(os.getenv("DB_PATH", "./data/events.db")).resolve()
-DB_PATH.parent.mkdir(
-    parents=True, exist_ok=True
-)  # SQLite no crea la carpeta contenedora sola
+DB_PATH.parent.mkdir(parents=True, exist_ok=True)  # SQLite no crea la carpeta contenedora sola
 SYSLOG_PORT = int(os.getenv("SYSLOG_PORT", "5514"))
 CORRELATION_THRESHOLD = int(os.getenv("CORRELATION_THRESHOLD", "5"))
 
-engine = create_engine(
-    f"sqlite:///{DB_PATH}", connect_args={"check_same_thread": False}
-)
+engine = create_engine(f"sqlite:///{DB_PATH}", connect_args={"check_same_thread": False})
 
 # Extrae la IP origen REAL (el atacante) desde el CSV de filterlog.
+# OJO: NetworkEvent.source_ip es la IP que envió el paquete UDP de syslog
+# (el propio pfSense), NO la IP del atacante -- por eso correlacionamos
+# usando esta extracción del raw_message, no la columna source_ip.
+# Ver SPEC.md §4 y §7.
 FILTERLOG_IPV4_RE = re.compile(
     r"filterlog:\s*\d+,,[^,]*,\d+,[^,]+,\w+,\w+,\w+,4,"
     r"[^,]*,[^,]*,\d+,\d+,\d+,\w+,\d+,\w+,"
@@ -40,10 +43,26 @@ FILTERLOG_IPV4_RE = re.compile(
 )
 
 
-# CORRECCIÓN UP045: Usamos `str | None` en lugar de `Optional[str]`
-def extract_attacker_ip(raw_message: str) -> str | None:
+def extract_attacker_ip(raw_message: str) -> Optional[str]:
     match = FILTERLOG_IPV4_RE.search(raw_message)
     return match.group("srcip") if match else None
+
+
+# Extrae accion/direccion + IPs para el detector de beaconing -- necesita
+# "action" (pass/block) ademas de las IPs, cosa que FILTERLOG_IPV4_RE no
+# captura (se dejo asi a proposito para no arriesgar el endpoint de
+# correlacion que ya esta probado y funcionando).
+FILTERLOG_CONNECTION_RE = re.compile(
+    r"filterlog:\s*\d+,,[^,]*,\d+,[^,]+,\w+,(?P<action>\w+),(?P<direction>\w+),4,"
+    r"[^,]*,[^,]*,\d+,\d+,\d+,\w+,\d+,\w+,"
+    r"\d+,(?P<srcip>[\d.]+),(?P<dstip>[\d.]+),"
+    r"(?P<srcport>\d+),(?P<dstport>\d+)"
+)
+
+
+def extract_connection_summary(raw_message: str) -> Optional[dict]:
+    match = FILTERLOG_CONNECTION_RE.search(raw_message)
+    return match.groupdict() if match else None
 
 
 @asynccontextmanager
@@ -65,12 +84,9 @@ def health():
 @app.get("/events")
 def list_events(limit: int = 50, only_unanalyzed: bool = False):
     with Session(engine) as session:
-        query = (
-            select(NetworkEvent).order_by(NetworkEvent.received_at.desc()).limit(limit)
-        )
+        query = select(NetworkEvent).order_by(NetworkEvent.received_at.desc()).limit(limit)
         if only_unanalyzed:
-            # CORRECCIÓN RUF100: Eliminado el `# noqa: E712` innecesario
-            query = query.where(NetworkEvent.analyzed == False)
+            query = query.where(NetworkEvent.analyzed == False)  # noqa: E712
         return session.exec(query).all()
 
 
@@ -102,20 +118,21 @@ async def analyze_event(event_id: int):
 
 
 @app.post("/events/correlate")
-async def correlate_events(
-    window_minutes: int = 10, threshold: int = CORRELATION_THRESHOLD
-):
+async def correlate_events(window_minutes: int = 10, threshold: int = CORRELATION_THRESHOLD):
     """
-    Agrupa eventos SIN ANALIZAR por IP atacante dentro de una ventana de tiempo.
+    Agrupa eventos SIN ANALIZAR por IP atacante (extraída del raw_message,
+    no de source_ip -- ver comentario junto a extract_attacker_ip) dentro
+    de una ventana de tiempo. Si un grupo alcanza el umbral, se envían
+    todos juntos al LLM en un solo prompt para que evalúe el patrón
+    (ej. fuerza bruta), en vez de analizar cada evento aislado.
+    Resuelve la limitación documentada en SPEC.md §7.
     """
-    # CORRECCIÓN DTZ003: Usamos timezone.utc y le quitamos la zona horaria 
-    # con replace(tzinfo=None) para que SQLite/SQLAlchemy no fallen al comparar.
-    cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(minutes=window_minutes)
+    cutoff = datetime.utcnow() - timedelta(minutes=window_minutes)
 
     with Session(engine) as session:
         events = session.exec(
             select(NetworkEvent)
-            .where(NetworkEvent.analyzed == False)
+            .where(NetworkEvent.analyzed == False)  # noqa: E712
             .where(NetworkEvent.received_at >= cutoff)
         ).all()
 
@@ -132,9 +149,7 @@ async def correlate_events(
 
         combined_log = "\n".join(e.raw_message for e in group_events)
         try:
-            result = await explain_correlated_events(
-                combined_log, count=len(group_events)
-            )
+            result = await explain_correlated_events(combined_log, count=len(group_events))
         except LLMAnalysisError as exc:
             logger.error("Fallo al correlacionar grupo %s: %s", attacker_ip, exc)
             continue
@@ -150,21 +165,176 @@ async def correlate_events(
                 session.add(db_event)
             session.commit()
 
-        results.append(
-            {
-                "attacker_ip": attacker_ip,
-                "event_count": len(group_events),
-                "event_ids": event_ids,
-                **result,
-            }
-        )
+        results.append({
+            "attacker_ip": attacker_ip,
+            "event_count": len(group_events),
+            "event_ids": event_ids,
+            **result,
+        })
 
-    return {
-        "window_minutes": window_minutes,
-        "threshold": threshold,
-        "groups_detected": len(results),
-        "groups": results,
-    }
+    return {"window_minutes": window_minutes, "threshold": threshold, "groups_detected": len(results), "groups": results}
+
+
+@app.post("/events/detect-beaconing")
+async def detect_beaconing(window_minutes: int = 60, min_occurrences: int = 5, max_cv: float = 0.15):
+    """
+    Detecta posible "malware phoning home" (beaconing C2): conexiones
+    salientes PERMITIDAS (pass, out) repetidas hacia el mismo destino con
+    intervalos de tiempo muy regulares -- patrón típico de malware que
+    llama a su servidor de control cada N segundos/minutos, distinto del
+    tráfico humano normal (irregular). La detección es determinista
+    (coeficiente de variación del intervalo entre eventos); el LLM solo
+    redacta la explicación sobre el hallazgo -- ver SPEC.md.
+
+    max_cv: coeficiente de variación (desviación estándar / media) máximo
+    para considerar el patrón "sospechosamente regular". Valores bajos
+    (ej. 0.15 = 15%) son más estrictos; tráfico humano normal suele tener
+    CV mucho más alto (>0.5).
+    """
+    cutoff = datetime.utcnow() - timedelta(minutes=window_minutes)
+
+    with Session(engine) as session:
+        events = session.exec(
+            select(NetworkEvent)
+            .where(NetworkEvent.analyzed == False)  # noqa: E712
+            .where(NetworkEvent.received_at >= cutoff)
+        ).all()
+
+        groups: dict[tuple, list[NetworkEvent]] = defaultdict(list)
+        for event in events:
+            conn = extract_connection_summary(event.raw_message)
+            if conn and conn["action"] == "pass" and conn["direction"] == "out":
+                key = (conn["srcip"], conn["dstip"], conn["dstport"])
+                groups[key].append(event)
+
+    results = []
+    for (src, dst, dport), group_events in groups.items():
+        if len(group_events) < min_occurrences:
+            continue
+
+        timestamps = sorted(e.received_at for e in group_events)
+        intervals = [(timestamps[i + 1] - timestamps[i]).total_seconds() for i in range(len(timestamps) - 1)]
+        if not intervals or any(i <= 0 for i in intervals):
+            continue
+
+        mean_interval = sum(intervals) / len(intervals)
+        variance = sum((i - mean_interval) ** 2 for i in intervals) / len(intervals)
+        stddev = variance ** 0.5
+        cv = stddev / mean_interval if mean_interval > 0 else 999
+
+        if cv > max_cv:
+            continue  # muy irregular -- probablemente tráfico humano normal, no beaconing
+
+        combined_log = "\n".join(e.raw_message for e in group_events)
+        context = (
+            f"Patrón detectado por heurística: {len(group_events)} conexiones salientes "
+            f"PERMITIDAS de {src} hacia {dst}:{dport}, con intervalo promedio de "
+            f"{mean_interval:.1f} segundos y una variacion de solo {cv * 100:.1f}% "
+            f"(muy regular -- tipico de un proceso automatizado llamando a un servidor "
+            f"remoto a intervalos fijos, no de uso humano normal).\n\nEventos:\n{combined_log}"
+        )
+        try:
+            result = await explain_correlated_events(context, count=len(group_events))
+        except LLMAnalysisError as exc:
+            logger.error("Fallo al analizar beaconing %s->%s:%s: %s", src, dst, dport, exc)
+            continue
+
+        event_ids = [e.id for e in group_events]
+        with Session(engine) as session:
+            for event_id in event_ids:
+                db_event = session.get(NetworkEvent, event_id)
+                db_event.severity = result["severity"]
+                db_event.event_type = f"posible beaconing: {result['event_type']}"
+                db_event.ai_explanation = result["explanation"]
+                db_event.analyzed = True
+                session.add(db_event)
+            session.commit()
+
+        results.append({
+            "src_ip": src,
+            "dst_ip": dst,
+            "dst_port": dport,
+            "event_count": len(group_events),
+            "mean_interval_seconds": round(mean_interval, 1),
+            "coefficient_of_variation": round(cv, 3),
+            "event_ids": event_ids,
+            **result,
+        })
+
+    return {"window_minutes": window_minutes, "groups_detected": len(results), "groups": results}
+
+
+@app.post("/events/detect-suspicious-dns")
+async def detect_suspicious_dns(window_minutes: int = 30, min_distinct_domains: int = 3):
+    """
+    Detecta posible malware con generación algorítmica de dominios (DGA)
+    o exfiltración vía DNS: un mismo host consultando VARIOS dominios de
+    alta entropía distintos en poco tiempo -- patrón típico de malware
+    "probando" dominios de C2 hasta encontrar uno activo. La detección de
+    "¿es este dominio sospechoso?" es determinista (dns_heuristics.py,
+    entropía de Shannon) -- el LLM nunca decide eso, solo redacta la
+    explicación sobre lo que la heurística ya marcó. Ver SPEC.md.
+
+    Requiere que pfSense tenga habilitado el logging de consultas DNS
+    (Unbound o dnsmasq) apuntando al mismo listener de syslog.
+    """
+    cutoff = datetime.utcnow() - timedelta(minutes=window_minutes)
+
+    with Session(engine) as session:
+        events = session.exec(
+            select(NetworkEvent)
+            .where(NetworkEvent.analyzed == False)  # noqa: E712
+            .where(NetworkEvent.received_at >= cutoff)
+        ).all()
+
+        groups: dict[str, list[tuple[NetworkEvent, str]]] = defaultdict(list)
+        for event in events:
+            dns = extract_dns_query(event.raw_message)
+            if dns and looks_like_dga(dns["domain"]):
+                groups[dns["client_ip"]].append((event, dns["domain"]))
+
+    results = []
+    for client_ip, hits in groups.items():
+        distinct_domains = sorted({domain for _, domain in hits})
+        if len(distinct_domains) < min_distinct_domains:
+            continue
+
+        group_events = [e for e, _ in hits]
+        domains_list = "\n".join(distinct_domains)
+        context = (
+            f"Patrón detectado por heurística de entropía: el host {client_ip} "
+            f"consultó {len(distinct_domains)} dominios distintos con nombres de "
+            f"alta entropía (aspecto pseudoaleatorio) en los últimos {window_minutes} "
+            f"minutos -- comportamiento típico de malware con generación "
+            f"algorítmica de dominios (DGA) probando servidores de C2, no de "
+            f"navegación humana normal.\n\nDominios detectados:\n{domains_list}"
+        )
+        try:
+            result = await explain_correlated_events(context, count=len(distinct_domains))
+        except LLMAnalysisError as exc:
+            logger.error("Fallo al analizar DNS sospechoso para %s: %s", client_ip, exc)
+            continue
+
+        event_ids = [e.id for e in group_events]
+        with Session(engine) as session:
+            for event_id in event_ids:
+                db_event = session.get(NetworkEvent, event_id)
+                db_event.severity = result["severity"]
+                db_event.event_type = f"DNS sospechoso: {result['event_type']}"
+                db_event.ai_explanation = result["explanation"]
+                db_event.analyzed = True
+                session.add(db_event)
+            session.commit()
+
+        results.append({
+            "client_ip": client_ip,
+            "distinct_domains": distinct_domains,
+            "event_count": len(group_events),
+            "event_ids": event_ids,
+            **result,
+        })
+
+    return {"window_minutes": window_minutes, "groups_detected": len(results), "groups": results}
 
 
 @app.get("/summary")
@@ -172,7 +342,7 @@ def summary(hours: int = 24):
     """Resumen simple para el chat del dashboard ('¿qué pasó hoy?')."""
     with Session(engine) as session:
         events = session.exec(
-            select(NetworkEvent).where(NetworkEvent.analyzed == True)
+            select(NetworkEvent).where(NetworkEvent.analyzed == True)  # noqa: E712
         ).all()
         by_severity: dict[str, int] = {}
         high_severity_types: dict[str, int] = {}
@@ -180,18 +350,12 @@ def summary(hours: int = 24):
             sev = e.severity or "low"
             by_severity[sev] = by_severity.get(sev, 0) + 1
             if sev == "high" and e.event_type:
-                high_severity_types[e.event_type] = (
-                    high_severity_types.get(e.event_type, 0) + 1
-                )
+                high_severity_types[e.event_type] = high_severity_types.get(e.event_type, 0) + 1
 
-        top_high_categories = sorted(
-            high_severity_types.items(), key=lambda kv: kv[1], reverse=True
-        )[:3]
+        top_high_categories = sorted(high_severity_types.items(), key=lambda kv: kv[1], reverse=True)[:3]
 
         return {
             "total_analyzed": len(events),
             "by_severity": by_severity,
-            "top_high_severity_types": [
-                {"event_type": t, "count": c} for t, c in top_high_categories
-            ],
+            "top_high_severity_types": [{"event_type": t, "count": c} for t, c in top_high_categories],
         }

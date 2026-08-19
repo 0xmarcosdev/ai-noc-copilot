@@ -24,7 +24,7 @@ Este README es el punto de entrada. El resto de la documentación vive en el rep
 
 ## Arquitectura
 
-```text
+```
 pfSense (o generador sintético) ──▶ backend/syslog_listener.py ──▶ SQLite
                                                                        │
                           GET /events  │  POST /events/{id}/analyze   │  POST /events/correlate
@@ -85,7 +85,6 @@ uvicorn app.main:app --reload
 sesión de terminal.
 
 En otra terminal:
-
 ```bash
 cd frontend
 pip install streamlit httpx
@@ -100,9 +99,8 @@ docker compose up -d
 ```
 
 En ambos casos:
-
-- Dashboard: <http://localhost:8501>
-- API docs (Swagger): <http://localhost:8000/docs>
+- Dashboard: http://localhost:8501
+- API docs (Swagger): http://localhost:8000/docs
 - Configurar pfSense real (si se dispone de uno): *Status > System Logs >
   Settings > Remote Log Servers* → apuntar a `<IP de tu equipo>:5514` (UDP).
 
