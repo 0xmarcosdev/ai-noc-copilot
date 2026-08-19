@@ -18,12 +18,14 @@ siguiente fase.
 ---
 
 ## Fase 0 — Diseño y alcance ✅ COMPLETA
+
 - [x] Evaluar propuestas de arquitectura, descartar sobrealcance (Elastic,
       Suricata/Zeek completo, multi-sucursal real, modelos 7B+)
 - [x] Definir MVP en `SPEC.md`
 - [x] Esqueleto del repo (FastAPI + SQLModel + SQLite + Streamlit + Ollama nativo)
 
 ## Fase 1 — Ingesta y pipeline base ✅ COMPLETA
+
 - [x] Listener syslog UDP (`syslog_listener.py`)
 - [x] Modelo `NetworkEvent` + SQLite
 - [x] Endpoints `/health`, `/events`
@@ -33,6 +35,7 @@ siguiente fase.
 - [x] Fix: venv fijado a Python 3.11/3.12 (incompatibilidad 3.14 + SQLModel)
 
 ## Fase 2 — LLM local ✅ COMPLETA
+
 - [x] `llm_service.py` + prompt `threat_explainer.txt`
 - [x] Endpoint `POST /events/{id}/analyze`
 - [x] Modelo confirmado: `my-qwen-3b:latest`
@@ -40,27 +43,32 @@ siguiente fase.
 - [x] Pipeline validado end-to-end contra Ollama real
 
 ## Fase 3 — Datos sintéticos y verificación de formato ✅ COMPLETA
+
 - [x] `scripts/generate_fake_logs.py` (escenarios: normal, bruteforce, portscan)
 - [x] Formato filterlog verificado contra fuente oficial (Perplexity + BNF de
       Netgate + código fuente `pfsense/pfsense` en GitHub)
 - [x] `docs/pfsense-filterlog-format.md`
 
 ## Fase 4 — Correlación de eventos 🔶 EN PROGRESO
+
 - [x] Detectada la limitación: evento aislado de fuerza bruta = severity "low"
 - [x] Regex de extracción de IP atacante desde `raw_message` (validado)
 - [x] Endpoint `POST /events/correlate`
 - [x] `/summary` extendido con `top_high_severity_types`
-- [ ] **Probar**: grupo de 10 eventos bruteforce → confirmar `severity: high`
-- [ ] Tests para `/events/correlate`
+- [x] **Probar**: grupo de 10 eventos bruteforce → confirmar `severity: high`
+- [x] Tests para `/events/correlate`
 
-## Fase 5 — Dashboard visible ⬜ PENDIENTE
-- [ ] Botón "Correlacionar eventos" en Streamlit
-- [ ] Vista de grupos correlacionados (no solo eventos individuales)
-- [ ] Mostrar `top_high_severity_types` del `/summary` en el panel derecho
-- [ ] 3-4 preguntas predefinidas del chat (usar resto del Documento 31 si
-      queda tiempo; si no, queda como roadmap post-curso)
+## Fase 5.5 — Detección extendida ✅ COMPLETA
+
+- [x] Heurística de entropía (DGA / túneles DNS) -- dns_heuristics.py
+- [x] Ingesta de logs DNS (Unbound + dnsmasq) -- dns_parsing.py, formato verificado con Perplexity
+- [x] POST /events/detect-beaconing -- coeficiente de variación de intervalos
+- [x] POST /events/detect-suspicious-dns
+- [x] 3 escenarios sintéticos nuevos: beacon, dns_dga, dns_normal, vpn_flapping
+- [x] AGENTS.md fusionado (Claude + OpenCode), linter limpio, bug de contaminación de tests corregido
 
 ## Fase 6 — Documentación y entrega ⬜ PENDIENTE
+
 - [ ] README final revisado (instrucciones probadas de cero, sin asumir nada)
 - [ ] `SPEC.md` actualizado como última pasada antes de entregar
 - [ ] Evidencia de uso de IA: capturas o transcripciones de sesiones clave
@@ -82,7 +90,7 @@ Formato: **`vMAJOR.MINOR.PATCH — "Nombre descriptivo"`**
 - **PATCH** sube con fixes dentro de una fase ya cerrada (bugs, no features).
 
 | Versión | Nombre | Fase | Estado |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | v0.1.0 | Esqueleto funcional | Fase 0-1 | ✅ hecho |
 | v0.2.0 | Pipeline validado con Ollama real | Fase 2 | ✅ hecho |
 | v0.3.0 | Generador de logs con formato verificado | Fase 3 | ✅ hecho |
@@ -93,6 +101,7 @@ Formato: **`vMAJOR.MINOR.PATCH — "Nombre descriptivo"`**
 ### Cómo etiquetar en git
 
 Cuando cierres una fase:
+
 ```cmd
 git add .
 git commit -m "feat: correlacion de eventos por patron de fuerza bruta"
@@ -117,9 +126,3 @@ resultado final"). Regla simple:
   que perder el punto de retomar mañana.
 - **Etiqueta de versión (`git tag`)**: solo al cerrar una fase completa de
   este ROADMAP, no en cada commit.
-
----
-
-*Actualiza este archivo junto con cada commit que cierre o avance una fase.
-Es más rápido mantenerlo al día ahora que reconstruirlo de memoria en
-la presentación del 4 de septiembre.*
