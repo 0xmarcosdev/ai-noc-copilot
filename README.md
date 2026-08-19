@@ -93,9 +93,30 @@ streamlit run dashboard.py
 
 ### Opción B — Docker (para el entregable de despliegue del curso)
 
+**Pasos previos obligatorios** — sin estos, el contenedor no arranca o no
+alcanza a Ollama:
+
+1. **Ollama debe escuchar en todas las interfaces, no solo localhost.** El
+   backend del contenedor se conecta vía `host.docker.internal:11434`; si
+   Ollama solo bindea `127.0.0.1`, la conexión se rechaza. Verificá que esté
+   escuchando en `0.0.0.0`:
+
+   ```powershell
+   netstat -ano | findstr 11434   # debe mostrar 0.0.0.0:11434, NO 127.0.0.1:11434
+   ```
+
+   Si solo escucha en `127.0.0.1`, reinicialo con:
+
+   ```powershell
+   $env:OLLAMA_HOST = "0.0.0.0:11434"; ollama serve
+   ```
+
+2. **Detené el backend de la Opción A si está corriendo.** El backend de
+   desarrollo y estos contenedores comparten los puertos `8000` y `5514/udp`;
+   si ambos corren a la vez, el build falla con `port is already allocated`.
+
 ```bash
-OLLAMA_HOST=0.0.0.0:11434 ollama serve   # Ollama debe escuchar en todas las interfaces
-docker compose up -d
+docker compose up -d --build
 ```
 
 En ambos casos:
@@ -103,6 +124,21 @@ En ambos casos:
 - API docs (Swagger): http://localhost:8000/docs
 - Configurar pfSense real (si se dispone de uno): *Status > System Logs >
   Settings > Remote Log Servers* → apuntar a `<IP de tu equipo>:5514` (UDP).
+
+Verificación rápida de punta a punta (Opción B):
+
+```bash
+curl http://localhost:8000/health                    # {"status":"ok"}
+curl -s -o /dev/null -w "%{http_code}" http://localhost:8501   # 200
+python scripts/generate_fake_logs.py --scenario bruteforce --count 10
+# después, en el dashboard: botón "Correlacionar eventos sin analizar"
+docker compose ps            # backend "healthy", frontend "running"
+docker compose logs -f backend
+```
+
+La base de datos vive en el volumen `backend_data` y persiste entre
+`docker compose down`/`up`. Para resetear la demo desde cero:
+`docker compose down -v` (borra también el volumen y los eventos).
 
 ## Testing
 

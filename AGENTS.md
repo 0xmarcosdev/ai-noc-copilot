@@ -39,7 +39,8 @@ Ollama no es servicio ni está en autorun: verificar con `curl http://localhost:
 - **Windows** es la plataforma real. No dar instrucciones con sintaxis bash (`export`, `&&` en cmd.exe).
 - **Python 3.11/3.12 únicamente** — 3.14 rompe SQLModel/Pydantic (PEP 649). No parchear código para 3.14; fijar la versión del venv (consistente con `python:3.11-slim` del Dockerfile).
 - `.env` está gitignoreado. `backend/.env` (`OLLAMA_HOST`, `OLLAMA_MODEL`, `DB_PATH`, `SYSLOG_PORT`) se carga automáticamente; `frontend/.env` (`BACKEND_URL`) se lee en `dashboard.py`.
-- No hay config de lint/typecheck (ruff instalado pero sin config). No inventar comandos de lint.
+- **Docker (despliegue, solo para el entregable del curso):** este equipo no tiene Docker instalado, así que el despliegue se valida por inspección, no en runtime. Prerequisitos de `docker compose up`: (1) Ollama bindeado a `0.0.0.0:11434`, no solo `127.0.0.1` — el contenedor lo alcanza vía `host.docker.internal`; (2) el backend de la Opción A detenido, o falla por puertos `8000`/`5514` compartidos. Hay `.dockerignore` en backend/ y frontend/ (excluye `.venv` ~400MB del contexto de build) y healthcheck del backend en el compose.
+- Lint: config de ruff en `pyproject.toml` (line-length 110; DTZ003/DTZ005 ignorados por decisión documentada — datetimes naive UTC). Ruff está en el venv pero ya no está en `requirements.txt`. No hay typecheck configurado. No inventar comandos de lint.
 
 ## Testing
 

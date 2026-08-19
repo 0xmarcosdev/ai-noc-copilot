@@ -1,16 +1,19 @@
-version: "3.9"
-
 # NOTA: Ollama NO corre en este compose. Ya lo tienes instalado nativo en
-# tu laptop con el modelo qwen2.5 descargado -- duplicarlo en un contenedor
-# gastaría SSD y complicaría el networking sin necesidad.
+# tu laptop con el modelo my-qwen-3b:latest descargado -- duplicarlo en un
+# contenedor gastaría SSD y complicaría el networking sin necesidad.
 #
 # Para desarrollo diario: corre backend/frontend directo con venv (ver
 # README, sección "Desarrollo local sin Docker"). Este compose.yml se usa
 # solo para el entregable de "despliegue" del curso.
 #
-# Antes de usar este compose, tu Ollama nativo debe escuchar en todas las
-# interfaces, no solo localhost:
-#   OLLAMA_HOST=0.0.0.0:11434 ollama serve
+# Antes de usar este compose:
+#   1) Tu Ollama nativo debe escuchar en TODAS las interfaces (no solo
+#      localhost) o el backend del contenedor no podrá alcanzarlo vía
+#      host.docker.internal:11434:
+#        OLLAMA_HOST=0.0.0.0:11434 ollama serve
+#   2) El backend de la Opción A (venv) debe estar detenido: comparte los
+#      puertos 8000 y 5514/udp con estos contenedores.
+#   Ver README, sección "Opción B".
 
 services:
   backend:
@@ -29,6 +32,13 @@ services:
       - DB_PATH=/app/data/events.db
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    healthcheck:
+      # python:3.11-slim no trae curl; el healthcheck usa urllib estándar.
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
     restart: unless-stopped
 
   frontend:
@@ -39,7 +49,8 @@ services:
     environment:
       - BACKEND_URL=http://backend:8000
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     restart: unless-stopped
 
 volumes:

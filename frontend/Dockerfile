@@ -2,7 +2,7 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-RUN pip install --no-cache-dir streamlit==1.38.0 httpx==0.27.2
+RUN pip install --no-cache-dir streamlit==1.39.0 httpx==0.27.2
 
 COPY dashboard.py .
 
