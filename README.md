@@ -41,7 +41,10 @@ pfSense (o generador sintético) ──▶ backend/syslog_listener.py ──▶ 
     ventana de tiempo y evalúa el patrón conjunto (resuelve la limitación de
     que un evento aislado de fuerza bruta se clasifica como severidad baja).
 - **frontend/**: Streamlit. Lista de eventos, botón "Explicar con IA", y
-  botón "Correlacionar eventos" con vista de patrones detectados.
+  botón "Correlacionar eventos" con vista de patrones detectados. Incluye
+  un panel de **ingesta manual** (`POST /events/ingest`) para pegar o subir
+  un lote de logs — la vía segura de `SPEC.md` §8 para usar logs reales de
+  pfSense sin streaming en vivo (sanitizar IPs internas antes de pegar).
 - **Ollama**: corre nativo en el host, no en contenedor (ver `SPEC.md` §3
   para la justificación).
 - **docker-compose.yml**: levanta backend + frontend (Ollama se conecta

@@ -96,13 +96,15 @@ post-MVP si se necesita filtrar/agregar por esos campos sin depender del LLM.
 |---|---|---|
 | GET | `/health` | liveness check |
 | GET | `/events?limit=&only_unanalyzed=` | lista eventos, más recientes primero |
+| POST | `/events/ingest` | ingesta manual: guarda líneas pegadas/subidas como eventos sin analizar (ver §8) |
 | POST | `/events/{id}/analyze` | envía el evento al LLM, persiste el resultado |
 | GET | `/summary?hours=` | conteo de eventos analizados por severidad |
 
 Swagger autogenerado por FastAPI en `/docs` — es la documentación de API
 formal exigida por el curso, no se mantiene a mano.
 
-Errores: `404` si el evento no existe, `502` si Ollama no responde o
+Errores: `404` si el evento no existe, `422` si el contenido de `/ingest`
+está vacío o excede el límite de líneas, `502` si Ollama no responde o
 devuelve algo no parseable (nunca `500` silencioso — ver `llm_service.py`).
 
 ## 6. Contrato del LLM (Threat Explainer)
@@ -146,6 +148,11 @@ sueltos.
   autorizado del administrador), sanitizar IPs internas si aplica, y
   usarlos como archivo de muestra — nunca streaming continuo en vivo hacia
   un dispositivo no gestionado.
+- Esta vía se materializa con `POST /events/ingest` (pegar o subir el lote
+  exportado desde el dashboard). Los eventos se marcan como "recién
+  recibidos" (`received_at = utcnow`) para que las ventanas de correlación
+  funcionen de inmediato sobre el lote; la sanitización de IPs sigue siendo
+  un paso manual del operador antes de ingerir.
 
 ## 9. Entorno y configuración
 

@@ -67,6 +67,13 @@ siguiente fase.
 - [x] 3 escenarios sintéticos nuevos: beacon, dns_dga, dns_normal, vpn_flapping
 - [x] AGENTS.md fusionado (Claude + OpenCode), linter limpio, bug de contaminación de tests corregido
 
+## Fase 5.6 — Ingesta manual de logs 🔶 EN PROGRESO
+
+- [x] POST /events/ingest (pegar/subir líneas como eventos sin analizar) -- materializa la vía segura de SPEC §8
+- [x] UI del dashboard: expander "Ingesta manual" (text_area + file_uploader + botón)
+- [x] Tests de ingesta (creación, líneas vacías/CRLF, 422, integración con /correlate)
+- [ ] Probar end-to-end con un lote real exportado de la GUI de pfSense (sanitizado)
+
 ## Fase 6 — Documentación y entrega ⬜ PENDIENTE
 
 - [ ] README final revisado (instrucciones probadas de cero, sin asumir nada)

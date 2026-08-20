@@ -310,3 +310,80 @@ def test_detect_suspicious_dns_ignores_legit_domains():
     resp = client.post("/events/detect-suspicious-dns", params={"window_minutes": 30, "min_distinct_domains": 3})
     assert resp.status_code == 200
     assert resp.json()["groups_detected"] == 0
+
+
+def _post_ingest(client, content: str, source: str = "manual"):
+    return client.post("/events/ingest", json={"content": content, "source": source})
+
+
+def test_ingest_paste_creates_events():
+    client = TestClient(app)
+    resp = _post_ingest(client, "línea uno\nlínea dos\nlínea tres")
+    assert resp.status_code == 200
+    assert resp.json() == {"ingested": 3, "skipped_empty": 0}
+
+    # Consulta directa a la DB: /events devuelve solo top-10 y otros tests
+    # dejan eventos con received_at en el futuro (beaconing), que no deben
+    # interferir con la verificación de la ingesta.
+    from sqlmodel import select
+
+    with Session(engine) as session:
+        manual = session.exec(select(NetworkEvent).where(NetworkEvent.source_ip == "manual")).all()
+    assert len(manual) == 3
+    assert all(e.analyzed is False for e in manual)
+    assert {e.raw_message for e in manual} == {"línea uno", "línea dos", "línea tres"}
+
+
+def test_ingest_skips_blank_and_crlf():
+    client = TestClient(app)
+    resp = _post_ingest(client, "primera\r\n\r\nsegunda\n\n   \ntercera\r\n")
+    assert resp.status_code == 200
+    assert resp.json()["ingested"] == 3
+    # splitlines() no emite un elemento vacío tras el salto final: 6 líneas crudas - 3 reales
+    assert resp.json()["skipped_empty"] == 3
+
+
+def test_ingest_empty_content_rejected():
+    client = TestClient(app)
+    for content in ("", "   ", "\n\n\n"):
+        resp = _post_ingest(client, content)
+        assert resp.status_code == 422
+
+
+def test_ingest_over_cap_rejected():
+    client = TestClient(app)
+    from app.main import MAX_INGEST_LINES
+
+    resp = _post_ingest(client, "\n".join(f"log {i}" for i in range(MAX_INGEST_LINES + 1)))
+    assert resp.status_code == 422
+
+
+def test_ingested_events_can_be_correlated(monkeypatch):
+    """La ingesta manual alimenta la correlación existente sin tocarla."""
+    from app import main as main_module
+
+    async def fake_explain_correlated_events(logs: str, count: int):
+        return {
+            "severity": "high",
+            "event_type": "fuerza bruta SSH",
+            "explanation": "Multiples intentos desde la misma IP en poco tiempo.",
+            "recommended_action": "Bloquear la IP origen.",
+        }
+
+    monkeypatch.setattr(main_module, "explain_correlated_events", fake_explain_correlated_events)
+
+    client = TestClient(app)
+    lines = "\n".join(_raw_message_with_attacker_ip("203.0.113.77", i) for i in range(6))
+    resp = _post_ingest(client, lines)
+    assert resp.status_code == 200
+    assert resp.json()["ingested"] == 6
+
+    resp = client.post("/events/correlate", params={"window_minutes": 10, "threshold": 5})
+    assert resp.status_code == 200
+    data = resp.json()
+    # Otros tests dejan grupos previos en la DB compartida, así que solo
+    # verificamos que el grupo de los eventos ingeridos exista y sea alto.
+    assert data["groups_detected"] >= 1
+    mine = [g for g in data["groups"] if g["attacker_ip"] == "203.0.113.77"]
+    assert len(mine) == 1
+    assert mine[0]["severity"] == "high"

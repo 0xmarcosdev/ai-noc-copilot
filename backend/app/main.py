@@ -11,6 +11,7 @@ from dotenv import load_dotenv
 load_dotenv()  # carga backend/.env si existe -- evita usar export/set a mano en cada terminal
 
 from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
 from sqlmodel import Session, SQLModel, create_engine, select
 
 from app.dns_heuristics import looks_like_dga
@@ -26,6 +27,7 @@ DB_PATH = Path(os.getenv("DB_PATH", "./data/events.db")).resolve()
 DB_PATH.parent.mkdir(parents=True, exist_ok=True)  # SQLite no crea la carpeta contenedora sola
 SYSLOG_PORT = int(os.getenv("SYSLOG_PORT", "5514"))
 CORRELATION_THRESHOLD = int(os.getenv("CORRELATION_THRESHOLD", "5"))
+MAX_INGEST_LINES = int(os.getenv("MAX_INGEST_LINES", "5000"))
 
 engine = create_engine(f"sqlite:///{DB_PATH}", connect_args={"check_same_thread": False})
 
@@ -64,6 +66,12 @@ def extract_connection_summary(raw_message: str) -> dict | None:
     return match.groupdict() if match else None
 
 
+def _parse_ingest_content(content: str) -> list[str]:
+    """Divide el contenido pegado/subido en líneas de log, descartando vacías.
+    splitlines() maneja tanto \n como \r\n (pastes de Windows)."""
+    return [line.strip() for line in content.splitlines() if line.strip()]
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     SQLModel.metadata.create_all(engine)
@@ -87,6 +95,43 @@ def list_events(limit: int = 50, only_unanalyzed: bool = False):
         if only_unanalyzed:
             query = query.where(NetworkEvent.analyzed == False)
         return session.exec(query).all()
+
+
+class IngestRequest(BaseModel):
+    content: str
+    source: str = "manual"
+
+
+@app.post("/events/ingest")
+def ingest_events(req: IngestRequest):
+    """
+    Ingesta manual de logs (pegar o subir archivo): guarda cada línea no
+    vacía como un NetworkEvent sin analizar, que luego fluye por los
+    endpoints existentes (/analyze, /correlate, /detect-*). Es el tooling
+    de la vía segura de SPEC §8: exportar un lote manual desde la GUI de
+    pfSense y sanitizarlo antes de ingerir.
+
+    Los eventos se marcan como 'recién recibidos' (received_at = utcnow)
+    para que las ventanas de correlación/beaconing/DNS funcionen de
+    inmediato sobre el lote pegado.
+    """
+    lines = _parse_ingest_content(req.content)
+    if not lines:
+        raise HTTPException(status_code=422, detail="No se encontraron líneas de log en el contenido")
+    if len(lines) > MAX_INGEST_LINES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Demasiadas líneas ({len(lines)}); máximo permitido: {MAX_INGEST_LINES}",
+        )
+
+    with Session(engine) as session:
+        session.add_all(
+            NetworkEvent(received_at=datetime.utcnow(), source_ip=req.source, raw_message=line)
+            for line in lines
+        )
+        session.commit()
+
+    return {"ingested": len(lines), "skipped_empty": len(req.content.splitlines()) - len(lines)}
 
 
 @app.post("/events/{event_id}/analyze")

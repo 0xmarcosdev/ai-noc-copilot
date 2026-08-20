@@ -9,6 +9,37 @@ st.set_page_config(page_title="AI-NOC Copilot", layout="wide")
 st.title("🛰️ AI-NOC Copilot")
 st.caption("Prototipo local — pfSense syslog + Ollama, 100% offline")
 
+with st.expander("📥 Ingesta manual de logs"):
+    pasted = st.text_area(
+        "Pegar logs (una línea por evento)",
+        height=160,
+        placeholder="Aug 19 12:00:00 pfsense-prod filterlog: ...",
+    )
+    uploaded = st.file_uploader("...o subir un archivo de log", type=["log", "txt"])
+    if st.button("Ingerir logs", type="primary"):
+        content = None
+        if uploaded is not None:
+            content = uploaded.getvalue().decode("utf-8", errors="replace")
+        elif pasted.strip():
+            content = pasted
+        if content:
+            try:
+                resp = httpx.post(
+                    f"{BACKEND_URL}/events/ingest",
+                    json={"content": content},
+                    timeout=30,
+                    trust_env=False,
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                st.success(f"{data['ingested']} eventos ingeridos")
+                st.rerun()
+            except httpx.HTTPError as exc:
+                st.error(f"Error al ingerir: {exc}")
+        else:
+            st.warning("Pegá logs o subí un archivo primero.")
+    st.caption("Recordá sanitizar IPs internas antes de pegar logs reales (ver SPEC §8).")
+
 col1, col2 = st.columns([2, 1])
 
 with col2:
