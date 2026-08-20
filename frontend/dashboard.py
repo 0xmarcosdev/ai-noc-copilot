@@ -93,17 +93,44 @@ with col2:
 with col1:
     st.subheader("Eventos recientes")
     only_new = st.checkbox("Solo sin analizar", value=False)
+    search_q = st.text_input("Buscar en raw_message", placeholder="ej: 203.0.113.99")
+    fcol1, fcol2 = st.columns(2)
+    sev_filter = fcol1.selectbox(
+        "Severidad", ["", "low", "medium", "high"],
+        format_func=lambda s: "Todas" if s == "" else s,
+    )
+    type_filter = fcol2.text_input("Tipo de evento (parcial)")
+
+    page_size = st.selectbox("Por página", [10, 25, 50], index=1)
+    filter_state = (only_new, search_q, sev_filter, type_filter, page_size)
+    if st.session_state.get("events_filters") != filter_state:
+        st.session_state["events_page"] = 0
+        st.session_state["events_filters"] = filter_state
+    page = st.session_state.get("events_page", 0)
+
     try:
-        events = httpx.get(
+        payload = httpx.get(
             f"{BACKEND_URL}/events",
-            params={"only_unanalyzed": only_new},
+            params={
+                "only_unanalyzed": only_new,
+                "q": search_q or None,
+                "severity": sev_filter or None,
+                "event_type": type_filter or None,
+                "limit": page_size,
+                "offset": page * page_size,
+            },
             timeout=5,
             trust_env=False,
         ).json()
+        events = payload.get("items", [])
+        total = payload.get("total", 0)
     except httpx.HTTPError:
         events = []
+        total = 0
         st.error("Backend no disponible. ¿Corriste el backend?")
 
+    if not events:
+        st.info("No hay eventos que coincidan con los filtros.")
     for event in events:
         label = f"[{event['received_at']}] {event['source_ip']} — {event.get('event_type') or 'sin analizar'}"
         with st.expander(label):
@@ -123,3 +150,14 @@ with col1:
                         st.rerun()
                     else:
                         st.error(f"Error: {resp.text}")
+
+    prev_disabled = page == 0
+    next_disabled = (page + 1) * page_size >= total
+    pcol1, pcol2, pcol3 = st.columns([1, 2, 1])
+    if pcol1.button("← Anterior", disabled=prev_disabled):
+        st.session_state["events_page"] = page - 1
+        st.rerun()
+    pcol2.markdown(f"Página {page + 1} — {total} eventos")
+    if pcol3.button("Siguiente →", disabled=next_disabled):
+        st.session_state["events_page"] = page + 1
+        st.rerun()

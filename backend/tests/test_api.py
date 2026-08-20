@@ -51,9 +51,79 @@ def test_list_events(seed_event):
     client = TestClient(app)
     resp = client.get("/events")
     assert resp.status_code == 200
-    events = resp.json()
-    assert len(events) >= 1
-    assert events[0]["source_ip"] == "192.168.1.1"
+    data = resp.json()
+    assert "items" in data and "total" in data
+    assert data["total"] >= 1
+    assert len(data["items"]) >= 1
+    assert data["items"][0]["source_ip"] == "192.168.1.1"
+    assert data["limit"] == 50
+    assert data["offset"] == 0
+
+
+def test_list_events_pagination_and_filters():
+    """Paginación (limit/offset) + filtros q / severity / only_unanalyzed / event_type."""
+    with Session(engine) as session:
+        session.add(NetworkEvent(
+            source_ip="10.0.0.1",
+            raw_message="filterlog block from 203.0.113.50 to internal",
+            severity="high",
+            event_type="fuerza bruta SSH",
+            analyzed=True,
+        ))
+        session.add(NetworkEvent(
+            source_ip="10.0.0.2",
+            raw_message="filterlog pass out to 8.8.8.8",
+            severity="low",
+            event_type="trafico normal",
+            analyzed=True,
+        ))
+        session.add(NetworkEvent(
+            source_ip="10.0.0.3",
+            raw_message="sin analizar todavia 203.0.113.99",
+            analyzed=False,
+        ))
+        session.commit()
+
+    client = TestClient(app)
+
+    # Búsqueda por texto en raw_message
+    resp = client.get("/events", params={"q": "203.0.113.50"})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["total"] >= 1
+    assert all("203.0.113.50" in e["raw_message"] for e in data["items"])
+
+    # Filtro por severidad
+    resp = client.get("/events", params={"severity": "high"})
+    data = resp.json()
+    assert data["total"] >= 1
+    assert all(e["severity"] == "high" for e in data["items"])
+
+    # Solo sin analizar
+    resp = client.get("/events", params={"only_unanalyzed": True})
+    data = resp.json()
+    assert data["total"] >= 1
+    assert all(e["analyzed"] is False for e in data["items"])
+
+    # Paginación: limit=1 debe devolver un solo item y total > 1
+    resp = client.get("/events", params={"limit": 1, "offset": 0})
+    data = resp.json()
+    assert data["limit"] == 1
+    assert data["offset"] == 0
+    assert len(data["items"]) == 1
+    assert data["total"] >= 2
+
+    resp2 = client.get("/events", params={"limit": 1, "offset": 1})
+    data2 = resp2.json()
+    assert data2["offset"] == 1
+    assert len(data2["items"]) == 1
+    assert data["items"][0]["id"] != data2["items"][0]["id"]
+
+    # event_type parcial
+    resp = client.get("/events", params={"event_type": "fuerza bruta"})
+    data = resp.json()
+    assert data["total"] >= 1
+    assert all("fuerza bruta" in (e.get("event_type") or "") for e in data["items"])
 
 
 def test_analyze_missing_event_returns_404():
@@ -322,8 +392,8 @@ def test_ingest_paste_creates_events():
     assert resp.status_code == 200
     assert resp.json() == {"ingested": 3, "skipped_empty": 0}
 
-    # Consulta directa a la DB: /events devuelve solo top-10 y otros tests
-    # dejan eventos con received_at en el futuro (beaconing), que no deben
+    # Consulta directa a la DB: /events está paginado y otros tests dejan
+    # eventos con received_at en el futuro (beaconing), que no deben
     # interferir con la verificación de la ingesta.
     from sqlmodel import select
 

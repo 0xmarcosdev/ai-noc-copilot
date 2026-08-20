@@ -12,6 +12,7 @@ load_dotenv()  # carga backend/.env si existe -- evita usar export/set a mano en
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
+from sqlalchemy import func
 from sqlmodel import Session, SQLModel, create_engine, select
 
 from app.dns_heuristics import looks_like_dga
@@ -89,12 +90,50 @@ def health():
 
 
 @app.get("/events")
-def list_events(limit: int = 50, only_unanalyzed: bool = False):
+def list_events(
+    limit: int = 50,
+    offset: int = 0,
+    only_unanalyzed: bool = False,
+    q: str | None = None,
+    severity: str | None = None,
+    event_type: str | None = None,
+):
+    """
+    Lista eventos con paginación y filtros opcionales.
+    Respuesta: {total, limit, offset, items}.
+    """
+    limit = max(limit, 1)
+    limit = min(limit, 500)
+    offset = max(offset, 0)
+
     with Session(engine) as session:
-        query = select(NetworkEvent).order_by(NetworkEvent.received_at.desc()).limit(limit)
+        filters = []
         if only_unanalyzed:
-            query = query.where(NetworkEvent.analyzed == False)
-        return session.exec(query).all()
+            filters.append(NetworkEvent.analyzed == False)
+        if severity:
+            filters.append(NetworkEvent.severity == severity)
+        if event_type:
+            filters.append(NetworkEvent.event_type.contains(event_type))
+        if q:
+            filters.append(NetworkEvent.raw_message.contains(q))
+
+        count_stmt = select(func.count()).select_from(NetworkEvent)
+        for f in filters:
+            count_stmt = count_stmt.where(f)
+        total = session.exec(count_stmt).one()
+
+        query = select(NetworkEvent)
+        for f in filters:
+            query = query.where(f)
+        query = query.order_by(NetworkEvent.received_at.desc()).offset(offset).limit(limit)
+        items = session.exec(query).all()
+
+        return {
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+            "items": items,
+        }
 
 
 class IngestRequest(BaseModel):
