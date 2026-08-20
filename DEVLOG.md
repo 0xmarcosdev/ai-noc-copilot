@@ -58,17 +58,86 @@
 
 ## Día 4 -16 ago 2026
 
-- Confirmado que un evento aislado de fuerza bruta se clasificaba como severity: low — la limitación que ya esperábamos.
-- Construída la corrección: endpoint POST /events/correlate, que agrupa eventos por IP atacante real (no por source_ip) y los manda juntos al LLM.
-Creado documento de seguimiento — creamos ROADMAP.md (checklist de fases + versionado vMAJOR.MINOR.PATCH).
-- Probado /correlate — dio groups_detected: 0. Encontramos el motivo: el generador de logs sintéticos usaba una IP atacante distinta en cada evento, así que nunca se agrupaban 5+ del mismo origen.
+- Confirmado que un evento aislado de fuerza bruta se clasificaba como severity:
+  low — la limitación que ya esperábamos.
+- Construída la corrección: endpoint POST /events/correlate, que agrupa eventos
+  por IP atacante real (no por source_ip) y los manda juntos al LLM.
+- Creado documento de seguimiento — creamos ROADMAP.md (checklist de fases + versionado
+  vMAJOR.MINOR.PATCH).
+- Probado /correlate — dio groups_detected: 0. Encontramos el motivo: el generador
+  de logs sintéticos usaba una IP atacante distinta en cada evento, así que nunca se
+  agrupaban 5+ del mismo origen.
 - Creado scripts/ensure_ollama.bat para levantar Ollama.
 - Prueba repetida: funcionó — 10 eventos agrupados, severity: high, patrón identificado correctamente.
-- Agregados tests para el endpoint de correlación, limpié unos duplicados que habían quedado en el archivo de tests.
+- Agregados tests para el endpoint de correlación, limpié unos duplicados que habían
+  quedado en el archivo de tests.
 - Actualizados ROADMAP.md y SPEC.md marcando la Fase 4 como completa.
-- Botón de correlación en el dashboard de Streamlit (Fase 5) — pero no llegué a dártelo, ahí es donde se cortó.
+- Botón de correlación en el dashboard de Streamlit (Fase 5) — pero no llegué a dártelo,
+  ahí es donde se cortó.
 
 ## Día 5 19 ago 2026
 
-- Resolvimos el conflicto de dependencias: Fijamos versiones compatibles de FastAPI, Starlette y Streamlit. (pip install "fastapi==0.115.0" "starlette==0.38.6" "streamlit==1.39.0")
-- Automatizamos el inicio del frontend y el backend mediante scripts. (Creando un archivo llamado .env dentro de D:\AiProject\ai-noc-copilot\frontend\ con contenido: BACKEND_URL=<http://localhost:8000>, y los cripts start-backend.ps1, start-frontend.ps1 y start-all.ps1)
+- Resolvimos el conflicto de dependencias: Fijamos versiones compatibles de
+  FastAPI, Starlette y Streamlit. (pip install "fastapi==0.115.0" "starlette==0.38.6"
+  "streamlit==1.39.0")
+- Automatizamos el inicio del frontend y el backend mediante scripts.
+  (Creando un archivo llamado .env dentro de D:\AiProject\ai-noc-copilot\frontend\ con contenido: BACKEND_URL=<http://localhost:8000>, y los cripts start-backend.ps1, start-frontend.ps1 y start-all.ps1)
+
+## Día 6 — 17-18 ago 2026
+
+- Construidos POST /events/detect-beaconing (coeficiente de variación de
+  intervalos) y POST /events/detect-suspicious-dns (entropía de Shannon,
+  formato DNS de pfSense verificado con Perplexity: Unbound + dnsmasq).
+- Principio de diseño declarado explícitamente: la detección siempre es
+  determinista (regex/entropía/estadística); el LLM nunca decide solo,
+  solo redacta la explicación.
+- Evaluado y descartado conscientemente un diseño de detección de picos
+  con z-score (scope creep -- reimplementaba el módulo de ML de anomalías
+  ya excluido del MVP).
+- 4 escenarios sintéticos nuevos: beacon, dns_dga, dns_normal, vpn_flapping.
+  Bug propio corregido: el generador de dominios DGA no era suficientemente
+  aleatorio para disparar la propia heurística de entropía.
+- Creado AGENTS.md (Claude) para dar contexto a OpenCode; fusionado luego
+  con la versión que generó OpenCode con /init -- encontró bugs reales que
+  la versión de Claude no tenía: contaminación de DB entre corridas de
+  test, y dos archivos basura comiteados por error.
+- ROADMAP: Fase 5.5 (Detección extendida) cerrada.
+
+## Día 7 — 19-20 ago 2026
+
+- Tarea delegada a OpenCode: validar despliegue Docker (Opción B). Docker
+  Desktop no estaba instalado -- validación por inspección estática en vez
+  de ejecución real. Encontrados y corregidos: falta de .dockerignore
+  (build incluía backend/.venv, ~421MB), healthcheck del backend ausente,
+  streamlit desactualizado, prerequisitos de Ollama/puertos no documentados
+  en el README. Commit db950d5.
+- Feature nueva: ingesta manual de logs (pegar o subir archivo), conectada
+  directamente a la decisión de SPEC §8 (vía segura para usar logs reales
+  de producción). Planificada con OpenCode en modo Plan, decisiones:
+  received_at=utcnow, ingesta pasiva (no auto-correlaciona).
+- POST /events/ingest implementado + UI en el dashboard + 5 tests nuevos.
+- Validación en vivo (no solo mocks): encontrado que Ollama en esta máquina
+  no tenía ningún modelo registrado (OLLAMA_MODELS apuntaba a un directorio
+  con el .gguf presente pero nunca registrado) -- causa raíz real del
+  fallo, diagnosticada paso a paso en vez de asumida. Modelo registrado
+  con `ollama create`. Correlación real confirmada: severity "high" para
+  6 eventos de fuerza bruta ingeridos manualmente (51s con el LLM real);
+  análisis individual confirmado: severity "low" para un evento normal
+  (18.7s). Contraste low/high sigue siendo la mejor evidencia del proyecto.
+- ROADMAP: Fase 5.6 (Ingesta manual) casi completa.
+
+## Día 8 — 20 ago 2026
+
+- Implementada búsqueda, filtros y paginación en `GET /events`
+  (limit/offset/q/severity/event_type/only_unanalyzed → `{total, limit,
+  offset, items}`), planificado con Grok. El parche del backend llegó con
+  la feature de ingesta accidentalmente borrada (los tests de /ingest
+  fallaban con 404) — restaurada desde el commit anterior y reaplicado el
+  cambio de paginación limpio sobre el mismo.
+- Dashboard: la lista de eventos ya no asume una respuesta tipo lista;
+  parsea `{items, total}` y agrega filtros + paginación con session_state
+  (resetea la página al cambiar filtros, botones anterior/siguiente).
+- Tests: `test_list_events` actualizado al nuevo shape + nuevo
+  `test_list_events_pagination_and_filters` (q, severity, only_unanalyzed,
+  event_type, limit/offset). Suite completa en verde (20 tests), ruff limpio.
+- ROADMAP: Fase 5.7 (Búsqueda, filtros y paginación) creada, casi completa.

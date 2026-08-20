@@ -95,7 +95,7 @@ post-MVP si se necesita filtrar/agregar por esos campos sin depender del LLM.
 | Método | Ruta | Descripción |
 |---|---|---|
 | GET | `/health` | liveness check |
-| GET | `/events?limit=&only_unanalyzed=` | lista eventos, más recientes primero |
+| GET | `/events?limit=&offset=&q=&severity=&event_type=&only_unanalyzed=` | lista eventos paginados, más recientes primero; responde `{total, limit, offset, items}` |
 | POST | `/events/ingest` | ingesta manual: guarda líneas pegadas/subidas como eventos sin analizar (ver §8) |
 | POST | `/events/{id}/analyze` | envía el evento al LLM, persiste el resultado |
 | GET | `/summary?hours=` | conteo de eventos analizados por severidad |
@@ -106,6 +106,10 @@ formal exigida por el curso, no se mantiene a mano.
 Errores: `404` si el evento no existe, `422` si el contenido de `/ingest`
 está vacío o excede el límite de líneas, `502` si Ollama no responde o
 devuelve algo no parseable (nunca `500` silencioso — ver `llm_service.py`).
+
+Filtros de `/events`: `q` (subcadena en `raw_message`), `severity` (igualdad),
+`event_type` (subcadena), `only_unanalyzed` (boolean). `limit` se acota a
+[1, 500] y `offset` a >= 0; la paginación usa `received_at` descendente.
 
 ## 6. Contrato del LLM (Threat Explainer)
 
