@@ -1,0 +1,6 @@
+- desarrollo a partir de este punto en tres ramas paralelas, para explorar el trabajo con el control de versiones y aprovechar las capacidades de herramientas como opencode, cursor y windsurf para implementar caracteristicas adicionales.
+- mejorar la calidad grafica, estetica y de diseno del dashboard de la aplicacion.
+- capacidad para digerir logs insertados via upload de archivos o pegados del portapapeles.
+- implementar opciones para la busqueda, filtros y ordenamiento de los eventos registrados y analisis hechos, anadir paginacion para mejorar la presentacion de los datos cuando sean extensos
+- mejorar el manejo de errores
+- insertar en la web un pequeno chat mediante el caul nos podamos comunicar con el LLM y hacer preguntas sobre los logs digeridos.
