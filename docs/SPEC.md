@@ -95,7 +95,7 @@ post-MVP si se necesita filtrar/agregar por esos campos sin depender del LLM.
 | Método | Ruta | Descripción |
 |---|---|---|
 | GET | `/health` | liveness check |
-| GET | `/events?limit=&offset=&q=&severity=&event_type=&only_unanalyzed=` | lista eventos paginados, más recientes primero; responde `{total, limit, offset, items}` |
+| GET | `/events?limit=&offset=&q=&severity=&event_type=&only_unanalyzed=&id_from=&id_to=&received_at_from=&received_at_to=&sort_by=&sort_dir=` | lista eventos paginados, más recientes primero; responde `{total, limit, offset, items}` |
 | POST | `/events/ingest` | ingesta manual: guarda líneas pegadas/subidas como eventos sin analizar (ver §8) |
 | POST | `/events/{id}/analyze` | envía el evento al LLM, persiste el resultado |
 | GET | `/summary?hours=` | conteo de eventos analizados por severidad |
@@ -108,8 +108,14 @@ está vacío o excede el límite de líneas, `502` si Ollama no responde o
 devuelve algo no parseable (nunca `500` silencioso — ver `llm_service.py`).
 
 Filtros de `/events`: `q` (subcadena en `raw_message`), `severity` (igualdad),
-`event_type` (subcadena), `only_unanalyzed` (boolean). `limit` se acota a
-[1, 500] y `offset` a >= 0; la paginación usa `received_at` descendente.
+`event_type` (subcadena), `only_unanalyzed` (boolean), `id_from`/`id_to`
+(rango cerrado de IDs; invertido = resultado vacío, el dashboard lo
+intercambia antes de enviarlo), `received_at_from`/`received_at_to`
+(ventana de ingesta, datetimes naive UTC). Orden opcional: `sort_by`
+(`id` / `received_at` / `severity` / `event_type`, validado con Literal —
+valor inválido devuelve 422) y `sort_dir` (`asc`/`desc`); por defecto
+`received_at` descendente con `id` como desempate para paginación
+determinista. `limit` se acota a [1, 500] y `offset` a >= 0.
 
 ## 6. Contrato del LLM (Threat Explainer)
 
@@ -192,5 +198,6 @@ de Python en su lugar (consistente con `python:3.11-slim` del Dockerfile).
   sección correspondiente.
 
 ---
-*Última actualización: 16 ago 2026 — pipeline de análisis individual
-validado end-to-end, correlación de eventos pendiente.*
+*Última actualización: 21 ago 2026 — Fase B de mejoras de dashboard: /events
+acepta filtros por rango de ID y fecha, y ordenación por campo (params
+opcionales; contrato previo intacto).*

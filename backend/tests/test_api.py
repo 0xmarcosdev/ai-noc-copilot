@@ -126,6 +126,115 @@ def test_list_events_pagination_and_filters():
     assert all("fuerza bruta" in (e.get("event_type") or "") for e in data["items"])
 
 
+def test_list_events_id_range_filter():
+    """Filtro por rango de IDs (id_from/id_to) y por ID único (rango cerrado)."""
+    with Session(engine) as session:
+        created = []
+        for i in range(3):
+            event = NetworkEvent(source_ip="192.0.2.50", raw_message=f"evento rango id {i}")
+            session.add(event)
+            session.commit()
+            session.refresh(event)
+            created.append(event.id)
+
+    client = TestClient(app)
+
+    # Rango que cubre solo el segundo y tercer evento
+    resp = client.get("/events", params={"id_from": created[1], "id_to": created[2]})
+    assert resp.status_code == 200
+    ids = [e["id"] for e in resp.json()["items"]]
+    assert all(created[1] <= eid <= created[2] for eid in ids)
+    assert created[0] not in ids
+
+    # Rango cerrado de un solo ID -> exactamente ese evento
+    resp = client.get("/events", params={"id_from": created[1], "id_to": created[1]})
+    assert [e["id"] for e in resp.json()["items"]] == [created[1]]
+
+    # Rango invertido (from > to) -> consulta vacía, no error
+    resp = client.get("/events", params={"id_from": created[2], "id_to": created[0]})
+    assert resp.status_code == 200
+    assert resp.json()["total"] == 0
+
+
+def test_list_events_date_range_filter():
+    """Filtro por ventana de received_at (naive UTC, como el resto del proyecto)."""
+    from datetime import datetime, timedelta
+
+    base = datetime.utcnow()
+    with Session(engine) as session:
+        events = {}
+        for name in ("viejo", "medio", "futuro"):
+            e = NetworkEvent(source_ip="192.0.2.60", raw_message=f"evento {name} fecha")
+            session.add(e)
+            session.commit()
+            session.refresh(e)
+            events[name] = e.id  # capturar el id DENTRO de la sesión (tras commit la instancia queda detached)
+        offsets = {"viejo": -10, "medio": -5, "futuro": 10}
+        for name, days in offsets.items():
+            db_event = session.get(NetworkEvent, events[name])
+            db_event.received_at = base + timedelta(days=days)
+            session.add(db_event)
+        session.commit()
+    mid_id = events["medio"]
+
+    client = TestClient(app)
+    # Ventana [-7d, -3d] alrededor de base: contiene SOLO el evento del medio
+    # (los demás eventos de la BD compartida están cerca de utcnow).
+    resp = client.get(
+        "/events",
+        params={
+            "received_at_from": (base - timedelta(days=7)).isoformat(),
+            "received_at_to": (base - timedelta(days=3)).isoformat(),
+        },
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert [e["id"] for e in data["items"]] == [mid_id]
+
+    # Solo límite inferior: debe incluir el futuro pero no el viejo
+    resp = client.get("/events", params={"received_at_from": (base + timedelta(days=9)).isoformat()})
+    ids = [e["id"] for e in resp.json()["items"]]
+    assert events["futuro"] in ids
+    assert events["viejo"] not in ids
+
+
+def test_list_events_sort_params():
+    """sort_by/sort_dir ordenan por el campo pedido; valor inválido -> 422."""
+    with Session(engine) as session:
+        for sev in ("low", "high", "medium"):
+            session.add(NetworkEvent(
+                source_ip="192.0.2.70",
+                raw_message=f"evento sort {sev}",
+                severity=sev,
+                event_type="tipo sort",
+                analyzed=True,
+            ))
+        session.commit()
+
+    client = TestClient(app)
+
+    # Orden por id ascendente y descendente
+    resp = client.get("/events", params={"q": "evento sort", "sort_by": "id", "sort_dir": "asc"})
+    ids = [e["id"] for e in resp.json()["items"]]
+    assert len(ids) == 3
+    assert ids == sorted(ids)
+
+    resp = client.get("/events", params={"q": "evento sort", "sort_by": "id", "sort_dir": "desc"})
+    ids_desc = [e["id"] for e in resp.json()["items"]]
+    assert ids_desc == sorted(ids_desc, reverse=True)
+
+    # Orden por severidad ascendente: high < low < medium (orden alfabético)
+    resp = client.get("/events", params={"q": "evento sort", "sort_by": "severity", "sort_dir": "asc"})
+    sevs = [e["severity"] for e in resp.json()["items"]]
+    assert sevs == ["high", "low", "medium"]
+
+    # Valor fuera del contrato -> 422 (validación de Literal en FastAPI)
+    resp = client.get("/events", params={"sort_by": "raw_message"})
+    assert resp.status_code == 422
+    resp = client.get("/events", params={"sort_dir": "lateral"})
+    assert resp.status_code == 422
+
+
 def test_analyze_missing_event_returns_404():
     client = TestClient(app)
     resp = client.post("/events/999999/analyze")

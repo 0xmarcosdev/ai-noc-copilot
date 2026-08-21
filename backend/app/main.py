@@ -5,6 +5,7 @@ from collections import defaultdict
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Literal
 
 from dotenv import load_dotenv
 
@@ -97,10 +98,26 @@ def list_events(
     q: str | None = None,
     severity: str | None = None,
     event_type: str | None = None,
+    id_from: int | None = None,
+    id_to: int | None = None,
+    received_at_from: datetime | None = None,
+    received_at_to: datetime | None = None,
+    sort_by: Literal["id", "received_at", "severity", "event_type"] = "received_at",
+    sort_dir: Literal["asc", "desc"] = "desc",
 ):
     """
     Lista eventos con paginación y filtros opcionales.
     Respuesta: {total, limit, offset, items}.
+
+    Filtros nuevos (opcionales, no rompen el contrato previo -- ver SPEC §5):
+    - id_from / id_to: rango cerrado de IDs (id >= id_from AND id <= id_to).
+      Si el rango está invertido (id_from > id_to) la consulta es vacía;
+      el dashboard lo intercambia antes de enviarla.
+    - received_at_from / received_at_to: ventana de ingesta (datetimes naive UTC).
+    - sort_by / sort_dir: orden por id, received_at, severity o event_type,
+      ascendente o descendente. Por defecto received_at desc (comportamiento
+      original). Se añade id como desempate para que la paginación sea
+      determinista cuando hay timestamps idénticos.
     """
     limit = max(limit, 1)
     limit = min(limit, 500)
@@ -116,16 +133,30 @@ def list_events(
             filters.append(NetworkEvent.event_type.contains(event_type))
         if q:
             filters.append(NetworkEvent.raw_message.contains(q))
+        if id_from is not None:
+            filters.append(NetworkEvent.id >= id_from)
+        if id_to is not None:
+            filters.append(NetworkEvent.id <= id_to)
+        if received_at_from is not None:
+            filters.append(NetworkEvent.received_at >= received_at_from)
+        if received_at_to is not None:
+            filters.append(NetworkEvent.received_at <= received_at_to)
 
         count_stmt = select(func.count()).select_from(NetworkEvent)
         for f in filters:
             count_stmt = count_stmt.where(f)
         total = session.exec(count_stmt).one()
 
+        sort_column = getattr(NetworkEvent, sort_by)
+        tiebreaker = NetworkEvent.id.desc() if sort_dir == "desc" else NetworkEvent.id.asc()
         query = select(NetworkEvent)
         for f in filters:
             query = query.where(f)
-        query = query.order_by(NetworkEvent.received_at.desc()).offset(offset).limit(limit)
+        query = (
+            query.order_by(sort_column.desc() if sort_dir == "desc" else sort_column.asc(), tiebreaker)
+            .offset(offset)
+            .limit(limit)
+        )
         items = session.exec(query).all()
 
         return {
