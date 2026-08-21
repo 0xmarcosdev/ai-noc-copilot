@@ -1,0 +1,12 @@
+Añadir un botón de actualizar para revisar si se añadieron nuevos logs sin necesidad de recargar toda la página, y notificar que se encontraron X cantidad de eventos nuevos
+Mostrar el ID de cada log de forma mas precisa y optima, permitir filtrar por ID del log o rango de IDs
+El textbox Tipo de evento (parcial) no queda bien identificado, no es intuitivo, no se como usarlo ni lo que hace, mejorar eso.
+mejorar la selección de logs a ver por pagina, mejor descripción, posicionamiento, menor tamaño (está grande por gusto), añadir debajo la cantidad de paginas que existen y que se pueda saltar hacia ellas haciendo click o escribiendo el numero y no solo dando click en anterior y siguiente, posibilidad de ir fácil al inicio y al final, como en los motores de búsqueda de internet.
+Guardar los eventos de patrones detectados en la correlación, ya que se muestran al pulsar el botón pero si recargo la página se pierde es info, necesitamos alguna forma de seguir pudiendo acceder al histórico de esas detecciones , es muy importante.
+Al hacer la prueba con los escenarios bruteforce y portscan recibí la misma sugerencia de que se trataba de un ataque por fuerza bruta, no logra distinguir bien entre esos dos eventos
+Necesito los botones de sort para poder organizar los logs por ID, fecha.....
+Necesito poder filtrar por fecha y hora
+Cuando consulte al modelo para el botón explicar con AI, mostrar info como el tiempo en segundos que demoró
+Mejor diseño de la visualización de las estadísticas , mayor cantidad de estadísticas, reportes, sugerencias, gráficos interactivos, posibilidad de copiar los datos, exportarlos, llevarlos a un documento o una tabla, cosas así
+uso de indicadores gráficos de colores para visualizar mejor en las listas los eventos sin analizar de los analizados.
+botón para generar un reporte on demand sobre un paquete de logs determinado(ya sea ingerido manual o analizado mediante filtros)
