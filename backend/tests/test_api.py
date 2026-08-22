@@ -235,6 +235,21 @@ def test_list_events_sort_params():
     assert resp.status_code == 422
 
 
+def test_list_events_empty_string_params_are_tolerated():
+    """Strings vacíos en params opcionales se tratan como None (no 422)."""
+    client = TestClient(app)
+    resp = client.get("/events", params={
+        "id_from": "",
+        "id_to": "",
+        "received_at_from": "",
+        "received_at_to": "",
+        "q": "",
+        "severity": "",
+    })
+    assert resp.status_code == 200
+    assert "items" in resp.json()
+
+
 def test_analyze_missing_event_returns_404():
     client = TestClient(app)
     resp = client.post("/events/999999/analyze")

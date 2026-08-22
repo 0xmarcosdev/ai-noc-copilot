@@ -5,14 +5,14 @@ from collections import defaultdict
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal
 
 from dotenv import load_dotenv
 
 load_dotenv()  # carga backend/.env si existe -- evita usar export/set a mano en cada terminal
 
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, BeforeValidator
 from sqlalchemy import func
 from sqlmodel import Session, SQLModel, create_engine, select
 
@@ -90,6 +90,14 @@ def health():
     return {"status": "ok"}
 
 
+def _empty_to_none(v):
+    return None if v == "" else v
+
+
+NormInt = Annotated[int | None, BeforeValidator(_empty_to_none)]
+NormDatetime = Annotated[datetime | None, BeforeValidator(_empty_to_none)]
+
+
 @app.get("/events")
 def list_events(
     limit: int = 50,
@@ -98,10 +106,10 @@ def list_events(
     q: str | None = None,
     severity: str | None = None,
     event_type: str | None = None,
-    id_from: int | None = None,
-    id_to: int | None = None,
-    received_at_from: datetime | None = None,
-    received_at_to: datetime | None = None,
+    id_from: NormInt = None,
+    id_to: NormInt = None,
+    received_at_from: NormDatetime = None,
+    received_at_to: NormDatetime = None,
     sort_by: Literal["id", "received_at", "severity", "event_type"] = "received_at",
     sort_dir: Literal["asc", "desc"] = "desc",
 ):

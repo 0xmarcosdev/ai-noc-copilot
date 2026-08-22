@@ -21,7 +21,7 @@ def _parse_id(texto: str) -> int | None:
     return int(texto) if texto.isdigit() else None
 
 # Isotipo animado SVG + CSS (docs/isotype.md, sección "SVG + animación CSS solo con transform")
-AINOC_LOGO_SVG = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="AI-NOC Copilot">
+AINOC_LOGO_SVG = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="40" height="40" role="img" aria-label="AI-NOC Copilot">
   <defs>
     <style>
       .ring{fill:none;stroke:#22D3EE;stroke-width:2.25;stroke-linecap:round}
@@ -55,7 +55,7 @@ st.set_page_config(page_title="AI-NOC Copilot", layout="wide", page_icon="static
 st.markdown(
     f"""
     <div style="display:flex;align-items:center;gap:12px;margin-bottom:0.75rem;">
-      {AINOC_LOGO_SVG}
+      <div style="flex-shrink:0;width:40px;height:40px;">{AINOC_LOGO_SVG}</div>
       <div>
         <div style="font-size:1.5rem;font-weight:600;color:#F3F4F6;line-height:1.2;">AI-NOC Copilot</div>
         <div style="color:#9CA3AF;font-size:0.9rem;">Copiloto local de logs de pfSense — 100 % offline</div>
@@ -217,27 +217,34 @@ with col1:
         id_from_val, id_to_val = id_to_val, id_from_val
 
     try:
-        payload = httpx.get(
+        raw_params = {
+            "only_unanalyzed": only_new,
+            "q": search_q or None,
+            "severity": sev_filter or None,
+            "event_type": type_filter or None,
+            "id_from": id_from_val,
+            "id_to": id_to_val,
+            "received_at_from": received_from.isoformat() if received_from else None,
+            "received_at_to": received_to.isoformat() if received_to else None,
+            "sort_by": SORT_FIELDS[sort_label],
+            "sort_dir": "asc" if "Asc" in sort_dir_label else "desc",
+            "limit": page_size,
+            "offset": page * page_size,
+        }
+        params = {k: v for k, v in raw_params.items() if v is not None}
+        resp = httpx.get(
             f"{BACKEND_URL}/events",
-            params={
-                "only_unanalyzed": only_new,
-                "q": search_q or None,
-                "severity": sev_filter or None,
-                "event_type": type_filter or None,
-                "id_from": id_from_val,
-                "id_to": id_to_val,
-                "received_at_from": received_from.isoformat() if received_from else None,
-                "received_at_to": received_to.isoformat() if received_to else None,
-                "sort_by": SORT_FIELDS[sort_label],
-                "sort_dir": "asc" if "Asc" in sort_dir_label else "desc",
-                "limit": page_size,
-                "offset": page * page_size,
-            },
+            params=params,
             timeout=5,
             trust_env=False,
-        ).json()
-        events = payload.get("items", [])
-        total = payload.get("total", 0)
+        )
+        payload = resp.json()
+        if resp.status_code >= 400 or "items" not in payload:
+            st.warning(f"El backend respondió {resp.status_code} — revisá los filtros.")
+            events, total = [], 0
+        else:
+            events = payload["items"]
+            total = payload["total"]
     except httpx.HTTPError:
         events = []
         total = 0
