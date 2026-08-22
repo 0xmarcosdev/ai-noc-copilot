@@ -98,6 +98,8 @@ post-MVP si se necesita filtrar/agregar por esos campos sin depender del LLM.
 | GET | `/events?limit=&offset=&q=&severity=&event_type=&only_unanalyzed=&id_from=&id_to=&received_at_from=&received_at_to=&sort_by=&sort_dir=` | lista eventos paginados, más recientes primero; responde `{total, limit, offset, items}` |
 | POST | `/events/ingest` | ingesta manual: guarda líneas pegadas/subidas como eventos sin analizar (ver §8) |
 | POST | `/events/{id}/analyze` | envía el evento al LLM, persiste el resultado |
+| POST | `/events/correlate?window_minutes=&threshold=` | agrupa eventos no analizados por IP atacante, clasifica patrón de puertos (fuerza bruta / escaneo), asigna `correlation_group` y envía al LLM |
+| GET | `/events/correlation-history?limit=` | historial de grupos de correlación: retorna grupos agrupados por `correlation_group` con metadatos (IPs, patrón, severidad, ventana temporal, IDs) |
 | GET | `/summary?hours=` | conteo de eventos analizados por severidad |
 
 Swagger autogenerado por FastAPI en `/docs` — es la documentación de API
@@ -130,20 +132,28 @@ determinista. `limit` se acota a [1, 500] y `offset` a >= 0.
   también `main.py` donde se consume `result["severity"]`, etc.** — es el
   punto de acoplamiento más frágil del proyecto.
 
-## 7. Limitación conocida y en desarrollo: correlación
+## 7. Correlación de eventos
 
-**Confirmado empíricamente (16 ago 2026)**: un evento de bloqueo SSH
-aislado se clasifica como `severity: low` — correcto desde la perspectiva
-de un solo evento, pero insuficiente cuando en realidad son 10 intentos
-seguidos desde distintas IPs al mismo puerto (patrón de fuerza bruta). El
-LLM nunca ve los eventos relacionados porque `/analyze` opera sobre un
-`id` a la vez.
+`POST /events/correlate` agrupa eventos no analizados por IP atacante
+(dentro de una ventana de tiempo configurable). Para cada grupo que
+supera el umbral:
 
-**Próximo trabajo**: endpoint que agrupe eventos no analizados por
-`(dstport, dst_ip)` o por `src_ip` dentro de una ventana de tiempo
-(ej. 5-10 min), y si supera un umbral de repeticiones, envíe el lote
-completo al LLM en un solo prompt para que evalúe el patrón, no eventos
-sueltos.
+1. **Clasificación determinista de puertos** (`classify_port_pattern`):
+   - `fuerza_bruta`: ≤2 puertos distintos, ≥3 eventos (mismo servicio).
+   - `escaneo_puertos`: ≥5 puertos distintos y ≥50% del total.
+   - `None` si no clasifica (indeterminado).
+2. **Asignación de `correlation_group`**: todos los eventos del grupo
+   reciben el mismo ID de grupo (entero autoincremental).
+3. **Explicación LLM**: el patrón clasificado se incluye en el prompt
+   para dar contexto al modelo.
+
+`GET /events/correlation-history` retorna los grupos más recientes
+con metadatos: IPs atacante, puertos únicos, patrón, severidad,
+ventana temporal y lista de IDs.
+
+El campo `NetworkEvent.correlation_group` (int, nullable, indexado)
+permite consultar todos los eventos de un grupo dado. Se migra con
+`ALTER TABLE` en el startup (lifespan) si la columna no existe.
 
 ## 8. Decisiones de seguridad / datos
 

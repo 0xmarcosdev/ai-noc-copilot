@@ -13,7 +13,8 @@ load_dotenv()  # carga backend/.env si existe -- evita usar export/set a mano en
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, BeforeValidator
-from sqlalchemy import func
+from sqlalchemy import func, text
+from sqlalchemy.exc import OperationalError
 from sqlmodel import Session, SQLModel, create_engine, select
 
 from app.dns_heuristics import looks_like_dga
@@ -68,6 +69,31 @@ def extract_connection_summary(raw_message: str) -> dict | None:
     return match.groupdict() if match else None
 
 
+def classify_port_pattern(events: list) -> str | None:
+    """Clasifica el patrón de puertos en un grupo de eventos correlacionados.
+
+    'fuerza_bruta': pocos puertos distintos (≤2), muchos eventos (≥3) —
+    el atacante golpea repetidamente el mismo servicio.
+    'escaneo_puertos': muchos puertos distintos (≥5 y ≥50% del total) —
+    el atacante sondea múltiples servicios.
+    Determinista, no usa LLM. Ver SPEC §7.
+    """
+    ports = []
+    for e in events:
+        conn = extract_connection_summary(e.raw_message)
+        if conn:
+            ports.append(conn["dstport"])
+    if len(ports) < 3:
+        return None
+    unique = len(set(ports))
+    total = len(ports)
+    if unique <= 2 and total >= 3:
+        return "fuerza_bruta"
+    if unique >= 5 and unique >= total * 0.5:
+        return "escaneo_puertos"
+    return None
+
+
 def _parse_ingest_content(content: str) -> list[str]:
     """Divide el contenido pegado/subido en líneas de log, descartando vacías.
     splitlines() maneja tanto \n como \r\n (pastes de Windows)."""
@@ -77,6 +103,12 @@ def _parse_ingest_content(content: str) -> list[str]:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     SQLModel.metadata.create_all(engine)
+    # Migración ligera: agregar correlation_group si falta (SQLite no soporta IF NOT EXISTS en ALTER)
+    with engine.begin() as conn:
+        try:
+            conn.execute(text("ALTER TABLE networkevent ADD COLUMN correlation_group INTEGER"))
+        except OperationalError:
+            pass  # columna ya existe
     transport = await start_syslog_listener(engine, host="0.0.0.0", port=SYSLOG_PORT)
     yield
     transport.close()
@@ -244,9 +276,13 @@ async def correlate_events(window_minutes: int = 10, threshold: int = CORRELATIO
     """
     Agrupa eventos SIN ANALIZAR por IP atacante (extraída del raw_message,
     no de source_ip -- ver comentario junto a extract_attacker_ip) dentro
-    de una ventana de tiempo. Si un grupo alcanza el umbral, se envían
-    todos juntos al LLM en un solo prompt para que evalúe el patrón
-    (ej. fuerza bruta), en vez de analizar cada evento aislado.
+    de una ventana de tiempo. Si un grupo alcanza el umbral:
+
+    1. Clasifica el patrón de puertos (fuerza bruta / escaneo de puertos)
+       con heurística determinista (classify_port_pattern).
+    2. Asigna un correlation_group común a todos los eventos del grupo.
+    3. Envía todo al LLM para la explicación, incluyendo la clasificación.
+
     Resuelve la limitación documentada en SPEC.md §7.
     """
     cutoff = datetime.utcnow() - timedelta(minutes=window_minutes)
@@ -264,14 +300,33 @@ async def correlate_events(window_minutes: int = 10, threshold: int = CORRELATIO
             if attacker_ip:
                 groups[attacker_ip].append(event)
 
+        max_group = session.exec(select(func.max(NetworkEvent.correlation_group))).one()
+        next_group = (max_group or 0) + 1
+
     results = []
     for attacker_ip, group_events in groups.items():
         if len(group_events) < threshold:
             continue
 
+        pattern = classify_port_pattern(group_events)
+
         combined_log = "\n".join(e.raw_message for e in group_events)
+        pattern_context = ""
+        if pattern == "fuerza_bruta":
+            pattern_context = (
+                "\n\nLa heuristica determinista clasifico este patron como FUERZA BRUTA: "
+                "muchos intentos hacia los mismos puertos/servicios."
+            )
+        elif pattern == "escaneo_puertos":
+            pattern_context = (
+                "\n\nLa heuristica determinista clasifico este patron como ESCANEO DE PUERTOS: "
+                "el atacante sondeo multiples servicios/puertos distintos."
+            )
+
         try:
-            result = await explain_correlated_events(combined_log, count=len(group_events))
+            result = await explain_correlated_events(
+                combined_log + pattern_context, count=len(group_events)
+            )
         except LLMAnalysisError as exc:
             logger.error("Fallo al correlacionar grupo %s: %s", attacker_ip, exc)
             continue
@@ -284,6 +339,7 @@ async def correlate_events(window_minutes: int = 10, threshold: int = CORRELATIO
                 db_event.event_type = f"patrón correlacionado: {result['event_type']}"
                 db_event.ai_explanation = result["explanation"]
                 db_event.analyzed = True
+                db_event.correlation_group = next_group
                 session.add(db_event)
             session.commit()
 
@@ -291,10 +347,60 @@ async def correlate_events(window_minutes: int = 10, threshold: int = CORRELATIO
             "attacker_ip": attacker_ip,
             "event_count": len(group_events),
             "event_ids": event_ids,
+            "correlation_group": next_group,
+            "pattern": pattern,
             **result,
         })
+        next_group += 1
 
     return {"window_minutes": window_minutes, "threshold": threshold, "groups_detected": len(results), "groups": results}
+
+
+@app.get("/events/correlation-history")
+def correlation_history(limit: int = 50):
+    """Historial de grupos de correlación agrupados por correlation_group.
+
+    Retorna los grupos más recientes con metadatos: IP atacante, patrón
+    detectado (fuerza bruta / escaneo), cantidad de eventos, ventana
+    temporal y lista de IDs. Ver SPEC §5.
+    """
+    with Session(engine) as session:
+        events = session.exec(
+            select(NetworkEvent)
+            .where(NetworkEvent.correlation_group.is_not(None))
+            .order_by(NetworkEvent.correlation_group.desc(), NetworkEvent.received_at)
+        ).all()
+
+    groups: dict[int, list[NetworkEvent]] = defaultdict(list)
+    for e in events:
+        groups[e.correlation_group].append(e)
+
+    result = []
+    for gid in sorted(groups, reverse=True):
+        gevents = groups[gid]
+        attacker_ips = set()
+        ports = set()
+        for e in gevents:
+            ip = extract_attacker_ip(e.raw_message)
+            if ip:
+                attacker_ips.add(ip)
+            conn = extract_connection_summary(e.raw_message)
+            if conn:
+                ports.add(conn["dstport"])
+
+        result.append({
+            "correlation_group": gid,
+            "event_count": len(gevents),
+            "attacker_ips": sorted(attacker_ips),
+            "unique_ports": sorted(ports),
+            "pattern": classify_port_pattern(gevents),
+            "severity": gevents[0].severity,
+            "first_seen": min(e.received_at for e in gevents).isoformat(),
+            "last_seen": max(e.received_at for e in gevents).isoformat(),
+            "event_ids": [e.id for e in gevents],
+        })
+
+    return {"total_groups": len(result), "groups": result[:limit]}
 
 
 @app.post("/events/detect-beaconing")

@@ -20,3 +20,4 @@ class NetworkEvent(SQLModel, table=True):
     event_type: str | None = Field(default=None)
     ai_explanation: str | None = Field(default=None)
     analyzed: bool = Field(default=False, index=True)
+    correlation_group: int | None = Field(default=None, index=True)

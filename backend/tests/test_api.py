@@ -581,3 +581,113 @@ def test_ingested_events_can_be_correlated(monkeypatch):
     mine = [g for g in data["groups"] if g["attacker_ip"] == "203.0.113.77"]
     assert len(mine) == 1
     assert mine[0]["severity"] == "high"
+
+
+def test_classify_port_pattern_brute_force():
+    """Muchos eventos al mismo puerto -> fuerza bruta."""
+    from types import SimpleNamespace
+
+    from app.main import classify_port_pattern
+
+    events = [
+        SimpleNamespace(raw_message=(
+            f"Aug 16 00:00:{i:02d} pfsense filterlog: 1,,,10000000,em0,match,block,in,4,"
+            f"0x0,,64,1000,0,DF,6,tcp,60,192.0.2.1,192.168.10.5,4000{i},22,0,S,1,,65535"
+        ))
+        for i in range(5)
+    ]
+    assert classify_port_pattern(events) == "fuerza_bruta"
+
+
+def test_classify_port_pattern_port_scan():
+    """Muchos puertos distintos -> escaneo de puertos."""
+    from types import SimpleNamespace
+
+    from app.main import classify_port_pattern
+
+    events = [
+        SimpleNamespace(raw_message=(
+            f"Aug 16 00:00:{i:02d} pfsense filterlog: 1,,,10000000,em0,match,block,in,4,"
+            f"0x0,,64,1000,0,DF,6,tcp,60,192.0.2.1,192.168.10.5,4000,{1000 + i * 100},0,S,1,,65535"
+        ))
+        for i in range(6)
+    ]
+    assert classify_port_pattern(events) == "escaneo_puertos"
+
+
+def test_classify_port_pattern_ambiguous():
+    """Pocos eventos y puertos mixtos -> None (indeterminado)."""
+    from types import SimpleNamespace
+
+    from app.main import classify_port_pattern
+
+    events = [
+        SimpleNamespace(raw_message=(
+            "Aug 16 00:00:00 pfsense filterlog: 1,,,10000000,em0,match,block,in,4,"
+            "0x0,,64,1000,0,DF,6,tcp,60,192.0.2.1,192.168.10.5,4000,22,0,S,1,,65535"
+        )),
+        SimpleNamespace(raw_message=(
+            "Aug 16 00:00:01 pfsense filterlog: 1,,,10000000,em0,match,block,in,4,"
+            "0x0,,64,1000,0,DF,6,tcp,60,192.0.2.1,192.168.10.5,4001,80,0,S,1,,65535"
+        )),
+    ]
+    assert classify_port_pattern(events) is None
+
+
+def test_correlate_assigns_correlation_group(monkeypatch):
+    """Después de correlacionar, los eventos comparten correlation_group."""
+    from app import main as main_module
+
+    async def fake_explain(logs: str, count: int):
+        return {
+            "severity": "high",
+            "event_type": "fuerza bruta SSH",
+            "explanation": "Patrón detectado.",
+            "recommended_action": "Bloquear.",
+        }
+
+    monkeypatch.setattr(main_module, "explain_correlated_events", fake_explain)
+
+    client = TestClient(app)
+    lines = "\n".join(_raw_message_with_attacker_ip("198.51.100.99", i) for i in range(6))
+    resp = _post_ingest(client, lines)
+    assert resp.json()["ingested"] == 6
+
+    resp = client.post("/events/correlate", params={"threshold": 5})
+    assert resp.status_code == 200
+    data = resp.json()
+    mine = [g for g in data["groups"] if g["attacker_ip"] == "198.51.100.99"]
+    assert len(mine) == 1
+    assert "correlation_group" in mine[0]
+    gid = mine[0]["correlation_group"]
+
+    # Verificar que los eventos en la BD tienen el correlation_group asignado
+    from sqlmodel import select as sel
+    with Session(engine) as session:
+        evts = session.exec(
+            sel(NetworkEvent).where(NetworkEvent.correlation_group == gid)
+        ).all()
+        assert len(evts) >= 5
+
+
+def test_correlation_history_returns_groups():
+    """GET /events/correlation-history retorna grupos agrupados."""
+    with Session(engine) as session:
+        for i in range(3):
+            session.add(NetworkEvent(
+                source_ip="10.0.0.1",
+                raw_message=f"evento historial {i}",
+                analyzed=True,
+                severity="high",
+                correlation_group=999,
+            ))
+        session.commit()
+
+    client = TestClient(app)
+    resp = client.get("/events/correlation-history")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["total_groups"] >= 1
+    g = [g for g in data["groups"] if g["correlation_group"] == 999]
+    assert len(g) == 1
+    assert g[0]["event_count"] == 3
