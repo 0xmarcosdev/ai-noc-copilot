@@ -4,6 +4,7 @@ Mantiene toda la lógica de "cómo le hablo al LLM" en un solo lugar para
 que cambiar de modelo (o de motor de inferencia) sea un cambio de una
 línea, no una refactorización.
 """
+
 import json
 import logging
 import os
@@ -13,7 +14,7 @@ import httpx
 
 logger = logging.getLogger("ai-noc.llm")
 
-OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
+OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://127.0.0.1:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "my-qwen-3b:latest")
 
 PROMPT_PATH = Path(__file__).parent / "prompts" / "threat_explainer.txt"
