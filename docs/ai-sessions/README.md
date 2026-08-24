@@ -21,6 +21,7 @@ la contribución real). Nombre de archivo: `AAAA-MM-DD-herramienta-tema.md`.
 | 2026-08-20 | OpenCode | Diseño visual: branding e isotipo | Fase 5 (UI) | Paleta de colores, CSS, isotipo animado SVG |
 | 2026-08-22 | OpenCode | Resumen visual del dashboard | Fase 5 (UI) | Documentación de diseño visual |
 | 2026-08-23 | OpenCode | Fases 5.8 y 5.9: correlación + gráficos | Fases 5.8, 5.9 | Histórico correlación, plotly, CSV/JSON, reporte on-demand |
+| 2026-08-24 | OpenCode | Verificación final y guion de demo | Fase 6 (prep.) | Confirmación stdlib (sin pandas), regresión 31/31, guion demo |
 
 ### Otros documentos de diseño
 

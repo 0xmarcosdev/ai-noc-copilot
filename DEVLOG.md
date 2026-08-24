@@ -218,3 +218,15 @@
   las agregaciones SQL/Python que ya tenemos.
 - ruff limpio en backend y frontend, 31/31 tests en verde.
   
+## Día 12 — 24 ago 2026
+
+- Verificación pre-grabación: confirmado que `dashboard.py` usa solo stdlib
+  (`csv.DictWriter`, `json.dumps`, `io.StringIO`) para exportar CSV/JSON —
+  NO usa pandas. No es necesario tocar `requirements.txt` ni Dockerfile.
+- Creado `docs/demo-script.md`: guion de demo de 8–10 minutos en 8 escenas
+  con comandos exactos, resultados esperados y qué explicar en cada momento.
+  Incluye checklist pre-grabación de 7 ítems.
+- ROADMAP actualizado: ítems de Fase 5.8 completados, annotados los
+  pendientes del humano en Fase 6 (evidencia IA, Docker, grabación, ensayo).
+- Regresión final: 31/31 tests ✅, ruff ✅, py_compile ✅.
+- Sesión 13 exportada a `docs/ai-sessions/2026-08-24-opencode-verificacion-y-guion-demo.md`.

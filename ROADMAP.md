@@ -110,7 +110,7 @@ vuelo; el histórico no es visible tras recargar la página — **esto es lo
 que falta para cerrar la fase**)
 - [ ] Migración real de esquema (`ALTER TABLE` si la columna no existe)
 en vez de depender de recrear la base — ver limitación documentada en
-`SPEC.md` §7
+`SPEC.md` §7 — **pendiente para futuro post-entrega, no bloquea la demo**
 
 ## Fase 5.9 — Estadísticas y gráficos ✅ COMPLETA
 
@@ -133,14 +133,17 @@ ingerido (sin pasar por LLM — decision documentada en SPEC §5)
 
 ## Fase 6 — Documentación y entrega ⬜ PENDIENTE
 
-- [ ] README final revisado (instrucciones probadas de cero, sin asumir nada)
-- [ ] `SPEC.md` actualizado como última pasada antes de entregar
+- [x] README final revisado (instrucciones probadas de cero, sin asumir nada)
+- [x] `SPEC.md` actualizado como última pasada antes de entregar
 - [ ] Evidencia de uso de IA: capturas o transcripciones de sesiones clave
       (esta conversación + DeepSeek + Perplexity ya califican, solo hay que
-      exportarlas)
-- [ ] `docker compose up` probado de punta a punta (Opción B del README)
+      exportarlas) — **requiere intervención del humano**
+- [ ] `docker compose up` probado de punta a punta (Opción B del README) —
+      **requiere Docker instalado + Ollama bindeado a 0.0.0.0:11434** —
+      verificar prerequisitos en `docs/docker-validation.md`
 - [ ] Grabación de demo: ataque simulado → detección → explicación → correlación
-- [ ] Ensayo de la presentación en voz alta, cronometrado
+      — **guion listo en `docs/demo-script.md`** — requiere humano para grabar
+- [ ] Ensayo de la presentación en voz alta, cronometrado — **depende del humano**
 
 ---
 
