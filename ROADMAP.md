@@ -81,7 +81,7 @@ siguiente fase.
 - [x] Tests de listado y paginación/filtros
 - [x] Probar filtros/paginación en vivo contra el backend con datos reales
 
-## Fase 5.8 — Persistencia y clasificación de correlación 🔶 EN PROGRESO
+## Fase 5.8 — Persistencia y clasificación de correlación ✅ COMPLETA
 
 [#fase-58--persistencia-y-clasificación-de-correlación--en-progreso](#fase-58--persistencia-y-clasificación-de-correlación--en-progreso)
 
@@ -104,7 +104,7 @@ patrón, severidad y ventana temporal)
 - [x] Tests: `classify_port_pattern` (fuerza bruta / escaneo / ambiguo),
 asignación de `correlation_group`, historial agrupado — 29/29 en verde,
 ruff limpio
-- [ ] Sección/botón en el dashboard de Streamlit para consumir
+- [x] Sección/botón en el dashboard de Streamlit para consumir
 `/events/correlation-history` (el botón actual solo corre `/correlate` al
 vuelo; el histórico no es visible tras recargar la página — **esto es lo
 que falta para cerrar la fase**)
@@ -112,25 +112,24 @@ que falta para cerrar la fase**)
 en vez de depender de recrear la base — ver limitación documentada en
 `SPEC.md` §7
 
-## Fase 5.9 — Estadísticas y gráficos ⬜ PENDIENTE
+## Fase 5.9 — Estadísticas y gráficos ✅ COMPLETA
 
-[#fase-59--estadísticas-y-gráficos--pendiente](#fase-59--estadísticas-y-gráficos--pendiente)
+[#fase-59--estadísticas-y-gráficos--completa](#fase-59--estadísticas-y-gráficos--completa)
 
 > "Fase D" del plan de mejoras de dashboard. Resuelve la recomendación
 > #10 (panel de estadísticas más rico, gráficos interactivos, exportar) y
 > #12 (reporte on-demand sobre un paquete de logs ingerido o filtrado).
 
-- [ ] Panel de estadísticas enriquecido (más allá de `by_severity` /
+- [x] Panel de estadísticas enriquecido (más allá de `by_severity` /
 `top_high_severity_types`): series por tiempo, distribución por tipo de
 evento, eventos correlacionados vs individuales
-- [ ] Gráficos interactivos con librería ya disponible offline (evaluar
-si conviene sumar `plotly` o `altair` al `requirements.txt` — sin CDNs,
-consistente con AGENTS.md)
-- [ ] Exportar datos (CSV/JSON) desde el dashboard — filtros activos o
-selección puntual
-- [ ] Botón de reporte on-demand: genera un resumen (vía LLM o
-determinista) sobre un paquete de logs dado (ingerido manualmente o
-resultado de los filtros de `/events`)
+- [x] Gráficos interactivos con plotly (offline, sin CDN — instalado via
+pip, 100% funcional sin red. Documentado en SPEC §5)
+- [x] Exportar datos (CSV/JSON) desde el dashboard — filtros activos
+- [x] Botón de reporte on-demand: genera un resumen determinista
+(agregaciones/estadísticas) sobre los eventos filtrados o el último lote
+ingerido (sin pasar por LLM — decision documentada en SPEC §5)
+- [x] Tests para endpoint /summary extendido (31/31 en verde, ruff limpio)
 
 ## Fase 6 — Documentación y entrega ⬜ PENDIENTE
 
@@ -160,7 +159,7 @@ Formato: **`vMAJOR.MINOR.PATCH — "Nombre descriptivo"`**
 | v0.2.0 | Pipeline validado con Ollama real | Fase 2 | ✅ hecho |
 | v0.3.0 | Generador de logs con formato verificado | Fase 3 | ✅ hecho |
 | v0.4.0 | Correlación de eventos | Fase 4 | ✅ hecho |
-| v0.4.1 | Persistencia y clasificación de correlación | Fase 5.8 | 🔶 en progreso |
+| v0.4.1 | Persistencia y clasificación de correlación | Fase 5.8 | ✅ hecho |
 | v0.5.0 | Dashboard completo | Fase 5 | ⬜ pendiente |
 | **v1.0.0** | **MVP listo para entrega — 4 sept 2026** | Fase 6 | ⬜ pendiente |
 

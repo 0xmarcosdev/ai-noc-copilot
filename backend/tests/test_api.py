@@ -691,3 +691,76 @@ def test_correlation_history_returns_groups():
     g = [g for g in data["groups"] if g["correlation_group"] == 999]
     assert len(g) == 1
     assert g[0]["event_count"] == 3
+
+
+def test_summary_enriquecido():
+    """GET /summary devuelve métricas extendidas: by_event_type, correlacionados, time_series."""
+    with Session(engine) as session:
+        for i in range(4):
+            session.add(NetworkEvent(
+                source_ip="192.0.2.1",
+                raw_message=f"summary test {i}",
+                severity="high" if i < 2 else "low",
+                event_type="fuerza bruta SSH",
+                analyzed=True,
+                correlation_group=1 if i < 2 else None,
+            ))
+        session.add(NetworkEvent(
+            source_ip="192.0.2.1",
+            raw_message="summary test beacon",
+            severity="medium",
+            event_type="posible beaconing",
+            analyzed=True,
+        ))
+        session.commit()
+
+    client = TestClient(app)
+    resp = client.get("/summary", params={"hours": 24})
+    assert resp.status_code == 200
+    data = resp.json()
+
+    # Claves existentes
+    assert "total_analyzed" in data
+    assert "by_severity" in data
+    assert "top_high_severity_types" in data
+
+    # Claves nuevas
+    assert "by_event_type" in data
+    assert isinstance(data["by_event_type"], list)
+    assert len(data["by_event_type"]) >= 1
+
+    assert "correlated_count" in data
+    assert data["correlated_count"] >= 2
+
+    assert "individual_count" in data
+    assert data["individual_count"] >= 0
+
+    assert "time_series" in data
+    assert isinstance(data["time_series"], list)
+
+
+def test_summary_time_series_agrupa_por_hora():
+    """La serie temporal agrupa eventos por hora de received_at."""
+    from datetime import datetime, timedelta
+
+    base = datetime.utcnow().replace(minute=0, second=0, microsecond=0)
+    with Session(engine) as session:
+        for i in range(3):
+            e = NetworkEvent(
+                source_ip="192.0.2.1",
+                raw_message=f"ts test {i}",
+                severity="low",
+                event_type="test",
+                analyzed=True,
+            )
+            session.add(e)
+            session.commit()
+            session.refresh(e)
+            e.received_at = base + timedelta(hours=i)
+            session.add(e)
+        session.commit()
+
+    client = TestClient(app)
+    resp = client.get("/summary", params={"hours": 48})
+    data = resp.json()
+    assert len(data["time_series"]) >= 2

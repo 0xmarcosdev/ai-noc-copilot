@@ -43,14 +43,25 @@ pfSense (o generador sintético) ──▶ backend/syslog_listener.py ──▶ 
     Clasifica de forma determinista fuerza bruta vs escaneo de puertos y
     persiste el grupo en `correlation_group`.
   - `GET /events/correlation-history`: histórico de grupos ya correlacionados
-    (sobrevive a recargar la página — el dashboard todavía no tiene una
-    sección que lo consuma, ver `ROADMAP.md` Fase 5.8).
+    (sobrevive a recargar la página — visible en el dashboard como sección
+    "Histórico de correlación").
+  - `POST /events/detect-beaconing`: detecta conexiones salientes periódicas
+    regulares (posible malware C2) usando coeficiente de variación de
+    intervalos.
+  - `POST /events/detect-suspicious-dns`: detecta consultas a dominios de
+    alta entropía (posible DGA) usando entropía de Shannon.
+  - `GET /summary`: resumen enriquecido con distribución por severidad,
+    tipos dominantes, series temporales y métricas de correlación.
 - **frontend/**: Streamlit. Lista de eventos paginada con filtros por texto,
   severidad y tipo, botón "Explicar con IA", y botón "Correlacionar eventos"
   con vista de patrones detectados. Incluye
   un panel de **ingesta manual** (`POST /events/ingest`) para pegar o subir
   un lote de logs — la vía segura de `SPEC.md` §8 para usar logs reales de
   pfSense sin streaming en vivo (sanitizar IPs internas antes de pegar).
+  Sección de **histórico de correlación** que persiste los grupos detectados.
+  **Gráficos interactivos** con plotly (pie de severidad, barras de tipos,
+  serie temporal). **Exportar datos** en CSV/JSON. **Reporte on-demand**
+  generando un resumen en Markdown descargable.
 - **Ollama**: corre nativo en el host, no en contenedor (ver `SPEC.md` §3
   para la justificación).
 - **docker-compose.yml**: levanta backend + frontend (Ollama se conecta
@@ -59,17 +70,22 @@ pfSense (o generador sintético) ──▶ backend/syslog_listener.py ──▶ 
 
 ### Datos de prueba (sin pfSense real disponible)
 
-```bash
+```powershell
 python scripts/generate_fake_logs.py --scenario normal --count 15
 python scripts/generate_fake_logs.py --scenario bruteforce --count 10
 python scripts/generate_fake_logs.py --scenario portscan --count 10
+python scripts/generate_fake_logs.py --scenario beacon --count 10
+python scripts/generate_fake_logs.py --scenario dns_dga --count 10
+python scripts/generate_fake_logs.py --scenario dns_normal --count 10
+python scripts/generate_fake_logs.py --scenario vpn_flapping --count 10
 ```
 
 Envía logs sintéticos con formato **real y verificado** de `filterlog` de
 pfSense al listener local (ver `docs/pfsense-filterlog-format.md` para las
 fuentes: gramática BNF oficial + código fuente de pfSense). Los escenarios
-`bruteforce` y `portscan` usan una única IP atacante fija por lote, para que
-`POST /events/correlate` pueda agruparlos y detectar el patrón.
+`bruteforce`, `portscan`, `beacon` y `dns_dga` usan una única IP atacante
+fija por lote, para que los endpoints de correlación/detección puedan
+agruparlos y detectar el patrón.
 
 ## Cómo correrlo
 
@@ -96,7 +112,7 @@ sesión de terminal.
 En otra terminal:
 ```bash
 cd frontend
-pip install streamlit httpx
+pip install -r requirements.txt
 streamlit run dashboard.py
 ```
 
@@ -122,7 +138,8 @@ alcanza a Ollama:
 
 2. **Detené el backend de la Opción A si está corriendo.** El backend de
    desarrollo y estos contenedores comparten los puertos `8000` y `5514/udp`;
-   si ambos corren a la vez, el build falla con `port is already allocated`.
+   si ambos corren a la vez, `docker compose up` falla con
+   `port is already allocated`.
 
 ```bash
 docker compose up -d --build

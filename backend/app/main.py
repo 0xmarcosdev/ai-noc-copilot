@@ -556,21 +556,51 @@ async def detect_suspicious_dns(window_minutes: int = 30, min_distinct_domains: 
 
 @app.get("/summary")
 def summary(hours: int = 24):
-    """Resumen simple para el chat del dashboard ('¿qué pasó hoy?')."""
+    """Resumen enriquecido para el dashboard: distribución por severidad,
+    tipos dominantes, series temporales, correlación y exportación.
+    """
     with Session(engine) as session:
         events = session.exec(select(NetworkEvent).where(NetworkEvent.analyzed == True)).all()
+
         by_severity: dict[str, int] = {}
         high_severity_types: dict[str, int] = {}
+        by_type: dict[str, int] = {}
+        correlated_count = 0
+
         for e in events:
             sev = e.severity or "low"
             by_severity[sev] = by_severity.get(sev, 0) + 1
             if sev == "high" and e.event_type:
                 high_severity_types[e.event_type] = high_severity_types.get(e.event_type, 0) + 1
+            etype = e.event_type or "sin clasificar"
+            by_type[etype] = by_type.get(etype, 0) + 1
+            if e.correlation_group is not None:
+                correlated_count += 1
 
         top_high_categories = sorted(high_severity_types.items(), key=lambda kv: kv[1], reverse=True)[:3]
+
+        # Serie temporal: eventos por hora de los últimos `hours`
+        from datetime import timedelta
+
+        cutoff = datetime.utcnow() - timedelta(hours=hours)
+        hourly_counts: dict[str, int] = {}
+        for e in events:
+            if e.received_at >= cutoff:
+                bucket = e.received_at.strftime("%Y-%m-%d %H:00")
+                hourly_counts[bucket] = hourly_counts.get(bucket, 0) + 1
+
+        time_series = [
+            {"hour": h, "count": hourly_counts[h]}
+            for h in sorted(hourly_counts)
+        ]
 
         return {
             "total_analyzed": len(events),
             "by_severity": by_severity,
             "top_high_severity_types": [{"event_type": t, "count": c} for t, c in top_high_categories],
+            "by_event_type": [{"event_type": t, "count": c} for t, c in
+                              sorted(by_type.items(), key=lambda kv: kv[1], reverse=True)],
+            "correlated_count": correlated_count,
+            "individual_count": len(events) - correlated_count,
+            "time_series": time_series,
         }

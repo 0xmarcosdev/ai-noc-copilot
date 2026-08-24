@@ -34,7 +34,7 @@ IA, documentación (este archivo + README + Swagger), testing, demo.
 - Análisis de eventos individuales vía LLM local (severidad, tipo, explicación).
 - Generación de datos sintéticos para pruebas (no depende de pfSense disponible).
 - Dashboard web (Streamlit): lista de eventos + botón "Explicar con IA".
-- Correlación básica de eventos relacionados (en progreso — ver §7).
+- Correlación de eventos relacionados (ver §7).
 
 ### Fuera de alcance (Roadmap, no se construye ahora)
 - Multi-sucursal real / múltiples fuentes de syslog simultáneas.
@@ -101,7 +101,7 @@ post-MVP si se necesita filtrar/agregar por esos campos sin depender del LLM.
 | POST | `/events/{id}/analyze` | envía el evento al LLM, persiste el resultado |
 | POST | `/events/correlate?window_minutes=&threshold=` | agrupa eventos no analizados por IP atacante, clasifica patrón de puertos (fuerza bruta / escaneo), asigna `correlation_group` y envía al LLM |
 | GET | `/events/correlation-history?limit=` | historial de grupos de correlación: retorna grupos agrupados por `correlation_group` con metadatos (IPs, patrón, severidad, ventana temporal, IDs) |
-| GET | `/summary?hours=` | conteo de eventos analizados por severidad |
+| GET | `/summary?hours=` | resumen enriquecido: distribución por severidad, tipos dominantes, eventos correlacionados vs individuales, series temporales por hora, distribución por tipo de evento |
 
 Swagger autogenerado por FastAPI en `/docs` — es la documentación de API
 formal exigida por el curso, no se mantiene a mano.
@@ -210,6 +210,17 @@ Python 3.14 rompe SQLModel/Pydantic por cambios en evaluación de
 anotaciones (PEP 649). No parchear el código para 3.14; fijar la versión
 de Python en su lugar (consistente con `python:3.11-slim` del Dockerfile).
 
+**Gráficos interactivos (Fase 5.9)**: se agregó `plotly==6.0.1` al
+`requirements.txt` para gráficos interactivos en el dashboard (pie charts,
+barras, series temporales). Plotly funciona 100% offline una vez
+instalado — no realiza llamadas de red, ni usa CDN, ni descarga assets
+en runtime. Es la misma categoría de dependencia que Ollama: se instala
+una vez y funciona sin conexión. Alternativa evaluada: `altair` (más
+ligero pero menos customizable). Decisión: plotly por la riqueza de
+interactividad y soporte nativo en Streamlit (`st.plotly_chart`). Los
+archivos `.js` de plotly se sirven desde el paquete pip instalado localmente,
+no desde ningún CDN externo.
+
 ## 10. Testing
 
 `backend/tests/test_api.py` (pytest): health check, listado de eventos,
@@ -233,11 +244,8 @@ de Python en su lugar (consistente con `python:3.11-slim` del Dockerfile).
   sección correspondiente.
 
 ---
-*Última actualización: 23 ago 2026 — Fase C de mejoras de dashboard
-(persistencia y clasificación de correlación): `classify_port_pattern`
-implementado (heurística de ratio de puertos distintos), `/events/correlate`
-ahora asigna `correlation_group` y pasa el patrón detectado como contexto
-al LLM, `GET /events/correlation-history` funcional end-to-end. 29/29 tests
-en verde. Pendiente: sección en el dashboard para consumir el histórico
-(ver ROADMAP Fase 5.8) y la migración de esquema real (ver limitación
-documentada en §7).*
+*Última actualización: 23 ago 2026 — Fase 6 en progreso: inspección Docker
+(`docs/docker-validation.md`), README actualizado con features de Fases
+5.8/5.9, `frontend/requirements.txt` creado (plotly incluido), SPEC §2
+corregido (correlación completada). 31/31 tests en verde. Pendiente:
+migración de esquema real (ver limitación documentada en §7).*

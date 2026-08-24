@@ -180,4 +180,41 @@
 - Pendiente para la próxima sesión (delegado a OpenCode): el botón/sección
   del dashboard para el histórico de correlación, y arrancar la Fase D
   completa con verificación exhaustiva (tests, lint, validación en vivo).
+
+## Día 10 — 23 ago 2026
+
+- Cerrada la Fase 5.8 (Persistencia y clasificación de correlación):
+  implementada la sección "Histórico de correlación" en `frontend/dashboard.py`
+  que consume `GET /events/correlation-history` al cargar la página. Muestra
+  cada grupo en un expander con ícono según patrón (🎯 fuerza_bruta,
+  📡 escaneo_puertos, ❓ indeterminado), IP(s) atacante, severidad (reusando
+  la misma paleta de colores del resto del dashboard), ventana temporal y
+  IDs de eventos. El botón "Correlacionar eventos sin analizar" se mantiene
+  intacto — la sección nueva es adicional, no reemplazo. 29/29 tests en
+  verde, ruff limpio, py_compile sin errores.
+
+## Día 11 — 23 ago 2026
+
+- Cerrada la Fase 5.9 (Estadísticas y gráficos, "Fase D" del plan de
+  mejoras de dashboard). Resuelve recomendaciones #10 y #12.
+- **Backend**: extendido `GET /summary` con claves nuevas sin romper el
+  contrato existente: `by_event_type` (distribución por tipo), `time_series`
+  (eventos agrupados por hora), `correlated_count`/`individual_count`
+  (eventos correlacionados vs individuales). 2 tests nuevos (31/31 total).
+- **Gráficos**: se evaluó y agregó `plotly==6.0.1` (100% offline, sin
+  CDN, alternativa evaluada: altair — descartada por menor
+  customización). Tres gráficos en el dashboard: pie chart de severidad,
+  barras horizontales de tipos de evento, línea de serie temporal por hora.
+  Documentado en SPEC §9 como decisión de diseño.
+- **Exportar**: botones de descarga CSV y JSON de los eventos filtrados
+  actualmente en el dashboard (usa los mismos datos de `GET /events`, sin
+  duplicar lógica).
+- **Reporte on-demand**: genera un resumen determinista (agregaciones y
+  estadísticas) en Markdown, descargable. Decisión de diseño: el reporte
+  NO pasa por el LLM — es 100% determinista (conteos, distribuciones,
+  proporciones). Razonamiento: el LLM redacta explicaciones de eventos
+  individuales/grupos, no genera informes estadísticos. Un prompt de LLM
+  para esto sería más lento, menos consistente y no aporta valor sobre
+  las agregaciones SQL/Python que ya tenemos.
+- ruff limpio en backend y frontend, 31/31 tests en verde.
   
