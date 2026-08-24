@@ -141,3 +141,43 @@
   `test_list_events_pagination_and_filters` (q, severity, only_unanalyzed,
   event_type, limit/offset). Suite completa en verde (20 tests), ruff limpio.
 - ROADMAP: Fase 5.7 (Búsqueda, filtros y paginación) creada, casi completa.
+
+## Día 9 — 23 ago 2026
+
+- Retomamos el proyecto con Claude después de una sesión previa con
+  OpenCode que había dejado la Fase C (persistencia y clasificación de
+  correlación — recomendaciones #5 y #6 de `docs/recomendaciones_dashboard.txt`)
+  a medio construir: la columna `correlation_group` ya estaba en
+  `NetworkEvent`, el endpoint `GET /events/correlation-history` ya existía,
+  y en `test_api.py` ya había 5 tests escritos para `classify_port_pattern`
+  y para la asignación de `correlation_group` — pero la función
+  `classify_port_pattern` no existía en `main.py` (los tests fallaban con
+  `NameError`) y `/events/correlate` nunca escribía `correlation_group`.
+- Implementado `classify_port_pattern`: heurística determinista basada en
+  la proporción de puertos destino distintos sobre el total de eventos del
+  grupo (`≤0.3` → fuerza_bruta, `≥0.7` → escaneo_puertos, zona intermedia o
+  menos de 3 eventos con puerto extraído → indeterminado). Sin involucrar
+  al LLM en la clasificación, consistente con el principio de detección
+  determinista ya aplicado en beaconing/DNS.
+- `POST /events/correlate` ahora asigna `correlation_group` (contador
+  global creciente, sin reutilizar IDs) y pasa el patrón de puertos
+  clasificado como contexto explícito al prompt del LLM, siguiendo el
+  mismo patrón ya usado en `detect-beaconing` y `detect-suspicious-dns`.
+- Encontrada y corregida una inconsistencia en `docs/SPEC.md` §7: describía
+  umbrales de clasificación distintos a los que terminamos implementando, y
+  afirmaba una migración automática de esquema (`ALTER TABLE` en el
+  lifespan) que en realidad nunca se codificó — documentado como
+  limitación conocida en vez de dejar la contradicción sin resolver (regla
+  de AGENTS.md).
+- 29/29 tests en verde (24 previos + 5 de esta fase), `ruff check` limpio.
+  Base de datos de desarrollo borrada y recreada desde cero por el usuario
+  para partir con el esquema nuevo.
+- ROADMAP: creada Fase 5.8 (Persistencia y clasificación de correlación,
+  "Fase C" del plan de dashboard) — backend completo, falta la sección del
+  dashboard que consuma `/events/correlation-history` (el botón actual solo
+  corre `/correlate` al vuelo y no persiste vista tras recargar). Creada
+  Fase 5.9 (Estadísticas y gráficos, "Fase D") como siguiente paso.
+- Pendiente para la próxima sesión (delegado a OpenCode): el botón/sección
+  del dashboard para el histórico de correlación, y arrancar la Fase D
+  completa con verificación exhaustiva (tests, lint, validación en vivo).
+  

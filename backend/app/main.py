@@ -65,6 +65,47 @@ def extract_connection_summary(raw_message: str) -> dict | None:
     return match.groupdict() if match else None
 
 
+# Umbral mínimo de eventos con puerto extraído para animarse a clasificar el
+# patrón -- con pocos eventos (ej. 2) cualquier mezcla de puertos es
+# estadísticamente indeterminada, no un escaneo real. Ver Fase 4/§7 SPEC.
+MIN_EVENTS_FOR_PORT_PATTERN = 3
+# Fracción de puertos distintos sobre el total de eventos. Fuerza bruta =
+# casi todos los eventos apuntan al MISMO puerto (ratio bajo, ej. 5 intentos
+# SSH -> 1 puerto distinto de 5 = 0.2). Escaneo de puertos = casi todos los
+# eventos apuntan a un puerto DISTINTO (ratio alto, ej. 6 puertos distintos
+# de 6 eventos = 1.0). Zona intermedia => no nos animamos a clasificar.
+BRUTEFORCE_MAX_RATIO = 0.3
+PORTSCAN_MIN_RATIO = 0.7
+
+
+def classify_port_pattern(events: list[NetworkEvent]) -> str | None:
+    """Heurística determinista para distinguir fuerza bruta de escaneo de puertos.
+
+    Fuerza bruta: muchos eventos, casi todos contra el MISMO puerto destino
+    (ej. 10 intentos SSH al puerto 22 desde la misma IP).
+    Escaneo de puertos: muchos eventos, cada uno contra un puerto destino
+    DISTINTO (ej. recorrido secuencial de puertos).
+    No decide nada por sí sola sobre severidad/malicia -- eso lo hace el LLM
+    a partir de este hallazgo, nunca al revés (ver SPEC.md §"detección
+    determinista").
+    """
+    dst_ports = []
+    for event in events:
+        conn = extract_connection_summary(event.raw_message)
+        if conn:
+            dst_ports.append(conn["dstport"])
+
+    if len(dst_ports) < MIN_EVENTS_FOR_PORT_PATTERN:
+        return None
+
+    distinct_ratio = len(set(dst_ports)) / len(dst_ports)
+    if distinct_ratio <= BRUTEFORCE_MAX_RATIO:
+        return "fuerza_bruta"
+    if distinct_ratio >= PORTSCAN_MIN_RATIO:
+        return "escaneo_puertos"
+    return None
+
+
 def _parse_ingest_content(content: str) -> list[str]:
     """Divide el contenido pegado/subido en líneas de log, descartando vacías."""
     return [line.strip() for line in content.splitlines() if line.strip()]
@@ -238,17 +279,34 @@ async def correlate_events(window_minutes: int = 10, threshold: int = CORRELATIO
             if attacker_ip:
                 groups[attacker_ip].append(event)
 
+        # correlation_group es un contador global creciente: nunca se
+        # reutiliza un id, aunque haya huecos, para que el historial
+        # (/events/correlation-history) no mezcle corridas distintas.
+        max_group = session.exec(select(func.max(NetworkEvent.correlation_group))).one()
+        next_group_id = (max_group or 0) + 1
+
     results = []
     for attacker_ip, group_events in groups.items():
         if len(group_events) < threshold:
             continue
 
+        port_pattern = classify_port_pattern(group_events)
         combined_log = "\n".join(e.raw_message for e in group_events)
+        context = (
+            f"Patrón detectado por heurística de puertos destino: {len(group_events)} eventos "
+            f"bloqueados desde el origen {attacker_ip}. Clasificación determinista según la "
+            f"variedad de puertos: '{port_pattern or 'indeterminado'}' (fuerza_bruta = mismo "
+            f"puerto repetido, escaneo_puertos = puertos distintos en cada intento).\n\n"
+            f"Eventos:\n{combined_log}"
+        )
         try:
-            result = await explain_correlated_events(combined_log, count=len(group_events))
+            result = await explain_correlated_events(context, count=len(group_events))
         except LLMAnalysisError as exc:
             logger.error("Fallo al correlacionar grupo %s: %s", attacker_ip, exc)
             continue
+
+        group_id = next_group_id
+        next_group_id += 1
 
         event_ids = [e.id for e in group_events]
         with Session(engine) as session:
@@ -258,6 +316,7 @@ async def correlate_events(window_minutes: int = 10, threshold: int = CORRELATIO
                 db_event.event_type = f"patrón correlacionado: {result['event_type']}"
                 db_event.ai_explanation = result["explanation"]
                 db_event.analyzed = True
+                db_event.correlation_group = group_id
                 session.add(db_event)
             session.commit()
 
@@ -266,6 +325,8 @@ async def correlate_events(window_minutes: int = 10, threshold: int = CORRELATIO
                 "attacker_ip": attacker_ip,
                 "event_count": len(group_events),
                 "event_ids": event_ids,
+                "correlation_group": group_id,
+                "port_pattern": port_pattern,
                 **result,
             }
         )

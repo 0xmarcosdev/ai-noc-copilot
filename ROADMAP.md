@@ -49,7 +49,7 @@ siguiente fase.
       Netgate + código fuente `pfsense/pfsense` en GitHub)
 - [x] `docs/pfsense-filterlog-format.md`
 
-## Fase 4 — Correlación de eventos 🔶 EN PROGRESO
+## Fase 4 — Correlación de eventos ✅ COMPLETA
 
 - [x] Detectada la limitación: evento aislado de fuerza bruta = severity "low"
 - [x] Regex de extracción de IP atacante desde `raw_message` (validado)
@@ -81,6 +81,57 @@ siguiente fase.
 - [x] Tests de listado y paginación/filtros
 - [x] Probar filtros/paginación en vivo contra el backend con datos reales
 
+## Fase 5.8 — Persistencia y clasificación de correlación 🔶 EN PROGRESO
+
+[#fase-58--persistencia-y-clasificación-de-correlación--en-progreso](#fase-58--persistencia-y-clasificación-de-correlación--en-progreso)
+
+> Corresponde a la "Fase C" del plan de mejoras de dashboard
+> (`docs/ai-sessions/Resumen de builds — Fases A y B del dashboard-opencode.md`):
+> resuelve las recomendaciones #5 (persistir el histórico de correlación,
+> que hoy se pierde al recargar la página) y #6 (distinguir fuerza bruta
+> de escaneo de puertos, que antes siempre daba el mismo diagnóstico).
+
+- [x] Columna `correlation_group` en `NetworkEvent` (sin tabla nueva —
+decisión consciente para no complicar el esquema SQLite)
+- [x] Heurística determinista `classify_port_pattern` en `main.py`: ratio
+de puertos destino distintos → `fuerza_bruta` / `escaneo_puertos` /
+`None` (indeterminado con pocos eventos o patrón mixto)
+- [x] `POST /events/correlate` asigna `correlation_group` a cada evento
+del grupo y pasa el patrón detectado como contexto explícito al LLM
+- [x] `GET /events/correlation-history` (ya existía como stub, ahora
+funcional: agrupa por `correlation_group`, expone IPs, puertos únicos,
+patrón, severidad y ventana temporal)
+- [x] Tests: `classify_port_pattern` (fuerza bruta / escaneo / ambiguo),
+asignación de `correlation_group`, historial agrupado — 29/29 en verde,
+ruff limpio
+- [ ] Sección/botón en el dashboard de Streamlit para consumir
+`/events/correlation-history` (el botón actual solo corre `/correlate` al
+vuelo; el histórico no es visible tras recargar la página — **esto es lo
+que falta para cerrar la fase**)
+- [ ] Migración real de esquema (`ALTER TABLE` si la columna no existe)
+en vez de depender de recrear la base — ver limitación documentada en
+`SPEC.md` §7
+
+## Fase 5.9 — Estadísticas y gráficos ⬜ PENDIENTE
+
+[#fase-59--estadísticas-y-gráficos--pendiente](#fase-59--estadísticas-y-gráficos--pendiente)
+
+> "Fase D" del plan de mejoras de dashboard. Resuelve la recomendación
+> #10 (panel de estadísticas más rico, gráficos interactivos, exportar) y
+> #12 (reporte on-demand sobre un paquete de logs ingerido o filtrado).
+
+- [ ] Panel de estadísticas enriquecido (más allá de `by_severity` /
+`top_high_severity_types`): series por tiempo, distribución por tipo de
+evento, eventos correlacionados vs individuales
+- [ ] Gráficos interactivos con librería ya disponible offline (evaluar
+si conviene sumar `plotly` o `altair` al `requirements.txt` — sin CDNs,
+consistente con AGENTS.md)
+- [ ] Exportar datos (CSV/JSON) desde el dashboard — filtros activos o
+selección puntual
+- [ ] Botón de reporte on-demand: genera un resumen (vía LLM o
+determinista) sobre un paquete de logs dado (ingerido manualmente o
+resultado de los filtros de `/events`)
+
 ## Fase 6 — Documentación y entrega ⬜ PENDIENTE
 
 - [ ] README final revisado (instrucciones probadas de cero, sin asumir nada)
@@ -108,7 +159,8 @@ Formato: **`vMAJOR.MINOR.PATCH — "Nombre descriptivo"`**
 | v0.1.0 | Esqueleto funcional | Fase 0-1 | ✅ hecho |
 | v0.2.0 | Pipeline validado con Ollama real | Fase 2 | ✅ hecho |
 | v0.3.0 | Generador de logs con formato verificado | Fase 3 | ✅ hecho |
-| v0.4.0 | Correlación de eventos | Fase 4 | 🔶 en progreso |
+| v0.4.0 | Correlación de eventos | Fase 4 | ✅ hecho |
+| v0.4.1 | Persistencia y clasificación de correlación | Fase 5.8 | 🔶 en progreso |
 | v0.5.0 | Dashboard completo | Fase 5 | ⬜ pendiente |
 | **v1.0.0** | **MVP listo para entrega — 4 sept 2026** | Fase 6 | ⬜ pendiente |
 
@@ -140,3 +192,4 @@ resultado final"). Regla simple:
   que perder el punto de retomar mañana.
 - **Etiqueta de versión (`git tag`)**: solo al cerrar una fase completa de
   este ROADMAP, no en cada commit.
+  

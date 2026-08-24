@@ -40,6 +40,11 @@ pfSense (o generador sintético) ──▶ backend/syslog_listener.py ──▶ 
   - `POST /events/correlate`: agrupa eventos por IP atacante dentro de una
     ventana de tiempo y evalúa el patrón conjunto (resuelve la limitación de
     que un evento aislado de fuerza bruta se clasifica como severidad baja).
+    Clasifica de forma determinista fuerza bruta vs escaneo de puertos y
+    persiste el grupo en `correlation_group`.
+  - `GET /events/correlation-history`: histórico de grupos ya correlacionados
+    (sobrevive a recargar la página — el dashboard todavía no tiene una
+    sección que lo consuma, ver `ROADMAP.md` Fase 5.8).
 - **frontend/**: Streamlit. Lista de eventos paginada con filtros por texto,
   severidad y tipo, botón "Explicar con IA", y botón "Correlacionar eventos"
   con vista de patrones detectados. Incluye

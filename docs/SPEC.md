@@ -84,6 +84,7 @@ de despliegue del curso; el desarrollo diario corre en venv sin Docker.
 | event_type | str? | lo rellena el LLM |
 | ai_explanation | str? | explicación en lenguaje natural |
 | analyzed | bool | false hasta que se llama `/analyze` |
+| correlation_group | int? | id de grupo de correlación, indexado; `None` hasta que `/events/correlate` lo asigna (ver §7) |
 
 Decisión: el log crudo se guarda tal cual, sin parser dedicado de
 filterlog. El LLM interpreta el CSV directamente. Un parser estructurado
@@ -138,22 +139,46 @@ determinista. `limit` se acota a [1, 500] y `offset` a >= 0.
 (dentro de una ventana de tiempo configurable). Para cada grupo que
 supera el umbral:
 
-1. **Clasificación determinista de puertos** (`classify_port_pattern`):
-   - `fuerza_bruta`: ≤2 puertos distintos, ≥3 eventos (mismo servicio).
-   - `escaneo_puertos`: ≥5 puertos distintos y ≥50% del total.
-   - `None` si no clasifica (indeterminado).
+1. **Clasificación determinista de puertos** (`classify_port_pattern` en
+   `main.py`): calcula la proporción de puertos destino *distintos* sobre
+   el total de eventos del grupo (usa `extract_connection_summary`, no
+   `source_ip`).
+   - `< 3` eventos con puerto extraíble → `None` (indeterminado; muestra
+     muy chica para clasificar con confianza).
+   - proporción de puertos distintos `≤ 0.3` → `fuerza_bruta` (casi todos
+     los intentos van al mismo puerto, ej. 5 intentos SSH → 1 puerto de 5).
+   - proporción `≥ 0.7` → `escaneo_puertos` (casi todos los puertos son
+     distintos, ej. 6 puertos de 6 eventos).
+   - zona intermedia (`0.3` – `0.7`) → `None` (patrón mixto, no nos
+     animamos a etiquetar).
+   Es 100% determinista (sin LLM); los umbrales viven como constantes
+   (`MIN_EVENTS_FOR_PORT_PATTERN`, `BRUTEFORCE_MAX_RATIO`,
+   `PORTSCAN_MIN_RATIO`) al inicio de `main.py`.
 2. **Asignación de `correlation_group`**: todos los eventos del grupo
-   reciben el mismo ID de grupo (entero autoincremental).
-3. **Explicación LLM**: el patrón clasificado se incluye en el prompt
-   para dar contexto al modelo.
+   reciben el mismo ID de grupo (entero global creciente: se calcula
+   `max(correlation_group) + 1` antes de procesar los grupos de la
+   llamada, y se incrementa por cada grupo nuevo — nunca se reutiliza un
+   ID, aunque haya huecos).
+3. **Explicación LLM**: el patrón clasificado (`fuerza_bruta` /
+   `escaneo_puertos` / `indeterminado`) se incluye como contexto explícito
+   en el prompt de correlación, igual que en `detect-beaconing` y
+   `detect-suspicious-dns` — el LLM nunca decide el patrón, solo lo explica.
 
 `GET /events/correlation-history` retorna los grupos más recientes
-con metadatos: IPs atacante, puertos únicos, patrón, severidad,
-ventana temporal y lista de IDs.
+(ordenados por `correlation_group` descendente) con metadatos: IPs
+atacante, puertos únicos, patrón, severidad, ventana temporal
+(`first_seen`/`last_seen`) y lista de IDs.
 
-El campo `NetworkEvent.correlation_group` (int, nullable, indexado)
-permite consultar todos los eventos de un grupo dado. Se migra con
-`ALTER TABLE` en el startup (lifespan) si la columna no existe.
+**Limitación conocida (no resuelta aún)**: el campo
+`NetworkEvent.correlation_group` se crea vía
+`SQLModel.metadata.create_all()` en el `lifespan` de arranque, que **solo
+crea tablas nuevas, no agrega columnas a tablas SQLite existentes**. Una
+base de datos creada con una versión anterior del modelo (sin esta
+columna) no se migra sola — hay que borrar el archivo `.db` y dejar que
+se recree, o migrar a mano (`ALTER TABLE networkevent ADD COLUMN
+correlation_group INTEGER`). No es un problema en desarrollo (datos
+sintéticos, se regeneran fácil) pero sí sería un problema real con datos
+de producción — candidato a arreglar antes de la Fase 6 si hay tiempo.
 
 ## 8. Decisiones de seguridad / datos
 
@@ -208,6 +233,11 @@ de Python en su lugar (consistente con `python:3.11-slim` del Dockerfile).
   sección correspondiente.
 
 ---
-*Última actualización: 21 ago 2026 — Fase B de mejoras de dashboard: /events
-acepta filtros por rango de ID y fecha, y ordenación por campo (params
-opcionales; contrato previo intacto).*
+*Última actualización: 23 ago 2026 — Fase C de mejoras de dashboard
+(persistencia y clasificación de correlación): `classify_port_pattern`
+implementado (heurística de ratio de puertos distintos), `/events/correlate`
+ahora asigna `correlation_group` y pasa el patrón detectado como contexto
+al LLM, `GET /events/correlation-history` funcional end-to-end. 29/29 tests
+en verde. Pendiente: sección en el dashboard para consumir el histórico
+(ver ROADMAP Fase 5.8) y la migración de esquema real (ver limitación
+documentada en §7).*
