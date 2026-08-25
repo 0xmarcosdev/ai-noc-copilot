@@ -195,9 +195,10 @@ with st.expander("📥 Ingesta manual de logs"):
             st.warning("Pegá logs o subí un archivo primero.")
     st.caption("Recordá sanitizar IPs internas antes de pegar logs reales (ver SPEC §8).")
 
-col1, col2 = st.columns([2, 1])
+# Layout mejorado: Eventos principales, sidebar con filtros
+main_col, sidebar_col = st.columns([3, 1])
 
-with col2:
+with sidebar_col:
     st.subheader("📊 Resumen")
     summary_data = None
     try:
@@ -227,12 +228,17 @@ with col2:
             labels = list(by_sev.keys())
             values = list(by_sev.values())
             colors = [SEVERITY_HEX.get(s, "#6B7280") for s in labels]
-            fig_sev = go.Figure(data=[go.Pie(
-                labels=labels, values=values,
-                marker={"colors": colors},
-                hole=0.4,
-                textinfo="label+value",
-            )])
+            fig_sev = go.Figure(
+                data=[
+                    go.Pie(
+                        labels=labels,
+                        values=values,
+                        marker={"colors": colors},
+                        hole=0.4,
+                        textinfo="label+value",
+                    )
+                ]
+            )
             fig_sev.update_layout(
                 title_text="Severidad",
                 height=280,
@@ -249,11 +255,16 @@ with col2:
         if by_type:
             type_labels = [t["event_type"] for t in by_type[:10]]
             type_values = [t["count"] for t in by_type[:10]]
-            fig_type = go.Figure(data=[go.Bar(
-                x=type_values, y=type_labels,
-                orientation="h",
-                marker_color="#22D3EE",
-            )])
+            fig_type = go.Figure(
+                data=[
+                    go.Bar(
+                        x=type_values,
+                        y=type_labels,
+                        orientation="h",
+                        marker_color="#22D3EE",
+                    )
+                ]
+            )
             fig_type.update_layout(
                 title_text="Eventos por tipo",
                 height=300,
@@ -271,14 +282,19 @@ with col2:
         if time_series:
             ts_hours = [t["hour"] for t in time_series]
             ts_counts = [t["count"] for t in time_series]
-            fig_ts = go.Figure(data=[go.Scatter(
-                x=ts_hours, y=ts_counts,
-                mode="lines+markers",
-                line={"color": "#22D3EE", "width": 2},
-                marker={"size": 6},
-                fill="tozeroy",
-                fillcolor="rgba(34,211,238,0.1)",
-            )])
+            fig_ts = go.Figure(
+                data=[
+                    go.Scatter(
+                        x=ts_hours,
+                        y=ts_counts,
+                        mode="lines+markers",
+                        line={"color": "#22D3EE", "width": 2},
+                        marker={"size": 6},
+                        fill="tozeroy",
+                        fillcolor="rgba(34,211,238,0.1)",
+                    )
+                ]
+            )
             fig_ts.update_layout(
                 title_text="Eventos por hora",
                 height=260,
@@ -305,22 +321,33 @@ with col2:
         export_data = st.session_state.events_list
 
         csv_buf = io.StringIO()
-        writer = csv.DictWriter(csv_buf, fieldnames=[
-            "id", "received_at", "source_ip", "severity", "event_type",
-            "ai_explanation", "analyzed", "correlation_group",
-        ])
+        writer = csv.DictWriter(
+            csv_buf,
+            fieldnames=[
+                "id",
+                "received_at",
+                "source_ip",
+                "severity",
+                "event_type",
+                "ai_explanation",
+                "analyzed",
+                "correlation_group",
+            ],
+        )
         writer.writeheader()
         for ev in export_data:
-            writer.writerow({
-                "id": ev.get("id"),
-                "received_at": ev.get("received_at"),
-                "source_ip": ev.get("source_ip"),
-                "severity": ev.get("severity", ""),
-                "event_type": ev.get("event_type", ""),
-                "ai_explanation": ev.get("ai_explanation", ""),
-                "analyzed": ev.get("analyzed", False),
-                "correlation_group": ev.get("correlation_group", ""),
-            })
+            writer.writerow(
+                {
+                    "id": ev.get("id"),
+                    "received_at": ev.get("received_at"),
+                    "source_ip": ev.get("source_ip"),
+                    "severity": ev.get("severity", ""),
+                    "event_type": ev.get("event_type", ""),
+                    "ai_explanation": ev.get("ai_explanation", ""),
+                    "analyzed": ev.get("analyzed", False),
+                    "correlation_group": ev.get("correlation_group", ""),
+                }
+            )
         csv_bytes = csv_buf.getvalue().encode("utf-8")
 
         json_bytes = json.dumps(export_data, ensure_ascii=False, indent=2).encode("utf-8")
@@ -400,17 +427,21 @@ with col2:
                     ]
                     for sev, count in sorted(severities.items()):
                         report_lines.append(f"- **{sev}:** {count}")
-                    report_lines.extend([
-                        "",
-                        "### Distribución por tipo de evento",
-                    ])
+                    report_lines.extend(
+                        [
+                            "",
+                            "### Distribución por tipo de evento",
+                        ]
+                    )
                     for etype, count in sorted(types.items(), key=lambda x: x[1], reverse=True):
                         report_lines.append(f"- **{etype}:** {count}")
-                    report_lines.extend([
-                        "",
-                        "---",
-                        f"*Generado automáticamente por AI-NOC Copilot — {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}*",
-                    ])
+                    report_lines.extend(
+                        [
+                            "",
+                            "---",
+                            f"*Generado automáticamente por AI-NOC Copilot — {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}*",
+                        ]
+                    )
 
                     report_text = "\n".join(report_lines)
                     st.markdown(report_text)
@@ -452,8 +483,8 @@ with col2:
                         st.markdown(f"**Severidad:** `{group['severity']}`")
                         st.markdown(f"**Explicación:** {group['explanation']}")
                         st.markdown(f"**Acción recomendada:** {group['recommended_action']}")
-                        st.caption(f"IDs de eventos: {', '.join(map(str, group['event_ids']))}")
-
+                        with st.popover("📋 Ver IDs de eventos"):
+                            st.caption(", ".join(map(str, group["event_ids"])))
     st.divider()
     st.subheader("📜 Histórico de correlación")
     if st.button("Actualizar histórico", key="refresh_history"):
@@ -498,10 +529,10 @@ with col2:
                 st.markdown(f"**IP(s) atacante(s):** {ips}")
                 st.markdown(f"**Puertos únicos:** {len(g.get('unique_ports', []))}")
                 st.markdown(f"**Ventana:** {first} → {last}")
-                with st.expander("IDs de eventos", expanded=False):
+                with st.popover("📋 Ver IDs de eventos"):
                     st.caption(", ".join(map(str, event_ids)))
 
-with col1:
+with main_col:
     st.subheader("Eventos recientes")
     only_new = st.checkbox("Solo sin analizar", value=False)
     search_q = st.text_input("Buscar en raw_message", placeholder="ej: 203.0.113.99")
@@ -714,10 +745,10 @@ with col1:
         st.markdown(
             '<span class="ainoc-chat-help">?'
             '<span class="ainoc-chat-tooltip">'
-            'Seleccioná un evento o grupo, escribí tu pregunta y recibí '
-            'una explicación detallada. Podés pegar logs adicionales con '
-            'el botón 📎 para dar más contexto.'
-            '</span></span>',
+            "Seleccioná un evento o grupo, escribí tu pregunta y recibí "
+            "una explicación detallada. Podés pegar logs adicionales con "
+            "el botón 📎 para dar más contexto."
+            "</span></span>",
             unsafe_allow_html=True,
         )
 
@@ -761,9 +792,9 @@ with col1:
                 for g in resp_gr.json().get("groups", []):
                     pat = PATTERN_ICONS.get(g.get("pattern"), "❓")
                     ips = ", ".join(g.get("attacker_ips", []))
-                    chat_options[f"Grupo #{g['correlation_group']} — {pat} {ips} ({g['event_count']} evt.)"] = g[
-                        "correlation_group"
-                    ]
+                    chat_options[
+                        f"Grupo #{g['correlation_group']} — {pat} {ips} ({g['event_count']} evt.)"
+                    ] = g["correlation_group"]
             except httpx.HTTPError:
                 st.info("No hay grupos de correlación disponibles.")
 
