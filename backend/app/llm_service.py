@@ -1,8 +1,8 @@
 """
 Cliente delgado sobre la API de Ollama (compatible con /api/generate).
-Mantiene toda la lógica de "cómo le hablo al LLM" en un solo lugar para
-que cambiar de modelo (o de motor de inferencia) sea un cambio de una
-línea, no una refactorización.
+Toda la lógica de "cómo le hablo al LLM" vive aquí para que cambiar
+de modelo (o de motor de inferencia) sea un cambio de una línea, no
+una refactorización.
 """
 
 import json
@@ -20,6 +20,9 @@ OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "my-qwen-3b:latest")
 PROMPT_PATH = Path(__file__).parent / "prompts" / "threat_explainer.txt"
 PROMPT_TEMPLATE = PROMPT_PATH.read_text(encoding="utf-8")
 
+CORRELATION_PROMPT_PATH = Path(__file__).parent / "prompts" / "correlation_explainer.txt"
+CORRELATION_PROMPT_TEMPLATE = CORRELATION_PROMPT_PATH.read_text(encoding="utf-8")
+
 
 class LLMAnalysisError(Exception):
     pass
@@ -35,33 +38,68 @@ def _ollama_client_kwargs() -> dict:
     }
 
 
-async def explain_event(log_raw: str) -> dict:
+async def _call_ollama(
+    prompt: str,
+    *,
+    keep_alive: str = "10m",
+    num_predict: int = 400,
+) -> dict:
     """
-    Envía un evento de log al modelo local y devuelve un dict con
-    severity / event_type / explanation / recommended_action.
-    Lanza LLMAnalysisError si Ollama no responde o el JSON es inválido,
-    para que el endpoint decida cómo degradar (ver main.py).
+    Helper compartido por todas las funciones públicas. Envía el prompt a
+    Ollama, loguea métricas de tiempos siempre, y devuelve el dict con
+    las 4 claves del contrato (severity/event_type/explanation/
+    recommended_action).
     """
-    prompt = PROMPT_TEMPLATE.format(log_raw=log_raw)
+    payload = {
+        "model": OLLAMA_MODEL,
+        "prompt": prompt,
+        "stream": False,
+        "format": "json",
+        "keep_alive": keep_alive,
+        "options": {"temperature": 0.1, "num_predict": num_predict},
+    }
 
     async with httpx.AsyncClient(**_ollama_client_kwargs()) as client:
         try:
             response = await client.post(
                 f"{OLLAMA_HOST}/api/generate",
-                json={
-                    "model": OLLAMA_MODEL,
-                    "prompt": prompt,
-                    "stream": False,
-                    "format": "json",
-                    "options": {"temperature": 0.1},
-                },
+                json=payload,
             )
             response.raise_for_status()
         except httpx.HTTPError as exc:
             logger.exception("Fallo al llamar a Ollama")
             raise LLMAnalysisError(f"Ollama no respondió: {exc}") from exc
 
-    raw_text = response.json().get("response", "")
+    result = response.json()
+
+    # --- Logging estructurado de métricas (siempre, no solo en debug) ---
+    total_ns = result.get("total_duration", 0)
+    load_ns = result.get("load_duration", 0)
+    prompt_eval_count = result.get("prompt_eval_count", 0)
+    prompt_eval_ns = result.get("prompt_eval_duration", 0)
+    eval_count = result.get("eval_count", 0)
+    eval_ns = result.get("eval_duration", 0)
+
+    total_s = total_ns / 1e9
+    load_s = load_ns / 1e9
+    prompt_eval_s = prompt_eval_ns / 1e9
+    gen_s = eval_ns / 1e9
+    tok_s = eval_count / gen_s if gen_s > 0 else 0.0
+
+    logger.info(
+        "Ollama timing: total=%.2fs load=%.2fs prompt_eval=%.2fs (%d tokens) "
+        "gen=%.2fs (%d tokens, %.1f tok/s)",
+        total_s,
+        load_s,
+        prompt_eval_s,
+        prompt_eval_count,
+        gen_s,
+        eval_count,
+        tok_s,
+    )
+
+    # --- Parseo de respuesta ---
+    raw_text = result.get("response", "")
     try:
         parsed = json.loads(raw_text)
     except json.JSONDecodeError as exc:
@@ -73,8 +111,15 @@ async def explain_event(log_raw: str) -> dict:
     return parsed
 
 
-CORRELATION_PROMPT_PATH = Path(__file__).parent / "prompts" / "correlation_explainer.txt"
-CORRELATION_PROMPT_TEMPLATE = CORRELATION_PROMPT_PATH.read_text(encoding="utf-8")
+async def explain_event(log_raw: str) -> dict:
+    """
+    Envía un evento de log al modelo local y devuelve un dict con
+    severity / event_type / explanation / recommended_action.
+    Lanza LLMAnalysisError si Ollama no responde o el JSON es inválido,
+    para que el endpoint decida cómo degradar (ver main.py).
+    """
+    prompt = PROMPT_TEMPLATE.format(log_raw=log_raw)
+    return await _call_ollama(prompt)
 
 
 async def explain_correlated_events(logs: str, count: int) -> dict:
@@ -84,31 +129,4 @@ async def explain_correlated_events(logs: str, count: int) -> dict:
     SPEC.md §7 -- resuelve la limitación de análisis evento-por-evento).
     """
     prompt = CORRELATION_PROMPT_TEMPLATE.format(logs=logs, count=count)
-
-    async with httpx.AsyncClient(**_ollama_client_kwargs()) as client:
-        try:
-            response = await client.post(
-                f"{OLLAMA_HOST}/api/generate",
-                json={
-                    "model": OLLAMA_MODEL,
-                    "prompt": prompt,
-                    "stream": False,
-                    "format": "json",
-                    "options": {"temperature": 0.1},
-                },
-            )
-            response.raise_for_status()
-        except httpx.HTTPError as exc:
-            logger.exception("Fallo al llamar a Ollama (correlación)")
-            raise LLMAnalysisError(f"Ollama no respondió: {exc}") from exc
-
-    raw_text = response.json().get("response", "")
-    try:
-        parsed = json.loads(raw_text)
-    except json.JSONDecodeError as exc:
-        raise LLMAnalysisError(f"Respuesta no es JSON válido: {raw_text[:200]}") from exc
-
-    for key in ("severity", "event_type", "explanation", "recommended_action"):
-        parsed.setdefault(key, "desconocido")
-
-    return parsed
+    return await _call_ollama(prompt)
