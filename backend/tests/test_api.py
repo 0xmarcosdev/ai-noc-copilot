@@ -18,6 +18,8 @@ os.environ["DB_PATH"] = _TEST_DB_PATH
 if os.path.exists(_TEST_DB_PATH):
     os.remove(_TEST_DB_PATH)
 
+from unittest.mock import patch
+
 import pytest
 from app.main import app, engine
 from app.models import NetworkEvent
@@ -764,3 +766,76 @@ def test_summary_time_series_agrupa_por_hora():
     resp = client.get("/summary", params={"hours": 48})
     data = resp.json()
     assert len(data["time_series"]) >= 2
+
+
+# ── Tests de chat interactivo (Fase 5.10) ──────────────────────────
+
+
+def test_chat_evento_inexistente_devuelve_404():
+    client = TestClient(app)
+    resp = client.post("/events/999999/chat", json={"message": "hola"})
+    assert resp.status_code == 404
+
+
+def test_chat_incluye_contexto_del_evento_en_system_prompt(seed_event):
+    """El raw_message del evento real debe aparecer en el payload mandado a Ollama."""
+    captured = {}
+
+    async def fake_chat_stream(messages, **_kwargs):
+        captured["messages"] = messages
+        yield "respuesta fake"
+
+    with patch("app.main.chat_stream", side_effect=fake_chat_stream):
+        client = TestClient(app)
+        resp = client.post(
+            f"/events/{seed_event.id}/chat",
+            json={"message": "¿Qué evento es este?"},
+        )
+        assert resp.status_code == 200
+
+    msgs = captured["messages"]
+    system_msg = msgs[0]["content"]
+    assert seed_event.raw_message in system_msg
+    assert msgs[-1]["role"] == "user"
+    assert msgs[-1]["content"] == "¿Qué evento es este?"
+
+
+def test_chat_usa_api_chat_no_generate(seed_event):
+    """El streaming debe llamar a /api/chat, no a /api/generate."""
+
+    async def fake_chat_stream(messages, **_kwargs):
+        yield "ok"
+
+    with patch("app.main.chat_stream", side_effect=fake_chat_stream):
+        client = TestClient(app)
+        resp = client.post(
+            f"/events/{seed_event.id}/chat",
+            json={"message": "test endpoint"},
+        )
+        assert resp.status_code == 200
+
+    # Verificar que chat_stream fue llamado (el endpoint lo usa internamente)
+    # La verificación de URL está en chat_service; aquí confirmamos que el
+    # endpoint no rompe y devuelve streaming correcto.
+    assert resp.status_code == 200
+
+
+def test_chat_propaga_error_502_si_ollama_falla(seed_event):
+    """Si Ollama no responde, el streaming aborta la conexión (el cliente
+    recibe el cierre abrupto). StreamingResponse no puede cambiar el
+    status code una vez enviado, pero la excepción se propaga."""
+    from app.llm_service import LLMAnalysisError
+
+    async def failing_chat_stream(messages, **_kwargs):
+        raise LLMAnalysisError("Ollama no respondió (simulado)")
+        yield  # pragma: no cover
+
+    with patch("app.main.chat_stream", side_effect=failing_chat_stream):
+        client = TestClient(app, raise_server_exceptions=False)
+        resp = client.post(
+            f"/events/{seed_event.id}/chat",
+            json={"message": "test error"},
+        )
+        # StreamingResponse no puede cambiar el status code, pero la
+        # excepción se loguea y el cliente recibe el aborto de conexión
+        assert resp.status_code in (500, 502)

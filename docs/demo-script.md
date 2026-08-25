@@ -73,7 +73,7 @@ Explicar brevemente:
 ### Escena 5 — Análisis individual de un evento (1 minuto)
 
 1. En la tabla de eventos, seleccionar un evento del grupo correlacionado.
-2. Hacer click en **"Analizar con LLM"** (o el botón equivalente).
+2. Hacer click en **"Explicar con AI"**.
 3. Mostrar la explicación en lenguaje natural que genera el LLM:
    > "El LLM recibe el evento con el contexto del grupo completo (patrón de fuerza bruta, IP, puertos) y genera una explicación detallada en español."
 

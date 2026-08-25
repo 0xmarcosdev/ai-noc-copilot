@@ -21,3 +21,22 @@ class NetworkEvent(SQLModel, table=True):
     ai_explanation: str | None = Field(default=None)
     analyzed: bool = Field(default=False, index=True)
     correlation_group: int | None = Field(default=None, index=True)
+
+
+class LLMTiming(SQLModel, table=True):
+    """Registro de métricas de cada llamada a la API de Ollama /api/generate.
+
+    Se escribe desde _call_ollama() en llm_service.py y se consulta desde
+    el endpoint GET /performance/history y el dashboard de rendimiento.
+    """
+    id: int | None = Field(default=None, primary_key=True)
+    timestamp: datetime = Field(default_factory=datetime.utcnow, index=True)
+    total_seconds: float = 0.0
+    load_seconds: float = 0.0
+    prompt_eval_seconds: float = 0.0
+    prompt_eval_tokens: int = 0
+    gen_seconds: float = 0.0
+    gen_tokens: int = 0
+    tokens_per_second: float = 0.0
+    model: str = ""
+    mode: str = ""  # "explain_event" o "explain_correlated"

@@ -101,6 +101,7 @@ post-MVP si se necesita filtrar/agregar por esos campos sin depender del LLM.
 | POST | `/events/{id}/analyze` | envía el evento al LLM, persiste el resultado |
 | POST | `/events/correlate?window_minutes=&threshold=` | agrupa eventos no analizados por IP atacante, clasifica patrón de puertos (fuerza bruta / escaneo), asigna `correlation_group` y envía al LLM |
 | GET | `/events/correlation-history?limit=` | historial de grupos de correlación: retorna grupos agrupados por `correlation_group` con metadatos (IPs, patrón, severidad, ventana temporal, IDs) |
+| POST | `/events/{event_id}/chat` | chat interactivo sobre un evento: recibe `{message, history}`, devuelve `StreamingResponse` con la respuesta del LLM (streaming puro) |
 | GET | `/summary?hours=` | resumen enriquecido: distribución por severidad, tipos dominantes, eventos correlacionados vs individuales, series temporales por hora, distribución por tipo de evento |
 
 Swagger autogenerado por FastAPI en `/docs` — es la documentación de API
@@ -132,6 +133,19 @@ determinista. `limit` se acota a [1, 500] y `offset` a >= 0.
 - **No modificar el contrato de salida (las 4 claves) sin actualizar
   también `main.py` donde se consume `result["severity"]`, etc.** — es el
   punto de acoplamiento más frágil del proyecto.
+
+### Chat interactivo (POST /events/{event_id}/chat)
+
+El chat interactivo usa `/api/chat` de Ollama (NO `/api/generate`) con
+`stream=true` para devolver la respuesta fragmento a fragmento vía
+`StreamingResponse` de FastAPI. El system prompt se arma dinámicamente
+con el contexto real del evento (raw_message, análisis previo si existe,
+info de correlación si pertenece a un grupo). Las mismas reglas del
+`threat_explainer.txt` aplican: nunca inventar IPs, puertos, ni contexto
+de red que no esté en los datos reales. `keep_alive=10m` (misma constante
+que `_call_ollama` en `llm_service.py`). La latencia del primer chunk es
+la misma que para `/api/generate` (~15-38s según si el modelo está
+caliente o frío, ver `docs/llm-latency-diagnosis.md`).
 
 ## 7. Correlación de eventos
 
@@ -244,8 +258,7 @@ no desde ningún CDN externo.
   sección correspondiente.
 
 ---
-*Última actualización: 23 ago 2026 — Fase 6 en progreso: inspección Docker
-(`docs/docker-validation.md`), README actualizado con features de Fases
-5.8/5.9, `frontend/requirements.txt` creado (plotly incluido), SPEC §2
-corregido (correlación completada). 31/31 tests en verde. Pendiente:
-migración de esquema real (ver limitación documentada en §7).*
+*Última actualización: 25 ago 2026 — Fase 5.10 backend completado
+(chat interactivo con streaming), 37/37 tests en verde. Pendiente: UI
+del chat (Parte B, decisiones del humano), migración de esquema real
+(ver limitación documentada en §7).*

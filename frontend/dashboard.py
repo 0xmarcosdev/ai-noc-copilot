@@ -71,6 +71,19 @@ BRANDING_CSS = """
         border: 1px solid var(--ainoc-border) !important;
     }
     label { color: var(--ainoc-muted) !important; }
+    /* Chat section */
+    .ainoc-chat-header{display:flex;align-items:center;gap:8px;padding:0.5rem 0;margin-bottom:0.25rem}
+    .ainoc-chat-header h3{margin:0;font-size:1.1rem}
+    .ainoc-chat-help{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;background:#374151;color:#9CA3AF;font-size:11px;cursor:help;position:relative;border:none;padding:0;line-height:1}
+    .ainoc-chat-help:hover{background:#4B5563;color:#F3F4F6}
+    .ainoc-chat-help .ainoc-chat-tooltip{display:none;position:absolute;bottom:calc(100% + 8px);left:50%;transform:translateX(-50%);background:#1F2937;color:#F3F4F6;padding:8px 12px;border-radius:8px;font-size:12px;white-space:nowrap;z-index:999;box-shadow:0 4px 12px rgba(0,0,0,.4);line-height:1.5;border:1px solid #374151}
+    .ainoc-chat-help:hover .ainoc-chat-tooltip{display:block}
+    .ainoc-chips{display:flex;flex-wrap:wrap;gap:6px;padding:0.4rem 0}
+    .ainoc-chip{display:inline-flex;align-items:center;gap:5px;padding:5px 12px;border-radius:16px;border:1px solid #374151;background:#1F2937;color:#D1D5DB;font-size:12px;cursor:pointer;transition:all .15s ease;white-space:nowrap;line-height:1.4}
+    .ainoc-chip:hover{background:#22D3EE;color:#0B1220;border-color:#22D3EE}
+    .ainoc-msg-user{background:#22D3EE;color:#0B1220;padding:10px 14px;border-radius:16px 16px 4px 16px;max-width:82%;margin-left:auto;font-size:.9rem;line-height:1.5}
+    .ainoc-msg-ai{background:#1F2937;color:#F3F4F6;padding:10px 14px;border-radius:16px 16px 16px 4px;max-width:82%;border:1px solid #374151;font-size:.9rem;line-height:1.5}
+    .stChatMessage{background:transparent !important;padding:4px 0 !important}
 </style>
 """
 st.markdown(BRANDING_CSS, unsafe_allow_html=True)
@@ -684,3 +697,219 @@ with col1:
     if pcol_last.button("Última »", disabled=(page >= total_pages - 1), help="Ir a la última página"):
         st.session_state["events_page"] = total_pages - 1
         st.rerun()
+
+    # ── Chat interactivo con el copiloto (Fase 5.10) ───────────────────────
+    st.divider()
+
+    if "chat_open" not in st.session_state:
+        st.session_state.chat_open = False
+
+    chat_toggle_col, chat_help_col = st.columns([5, 1])
+    with chat_toggle_col:
+        if st.checkbox("💬  Chat con el Copiloto", value=st.session_state.chat_open, key="chat_toggle"):
+            st.session_state.chat_open = True
+        else:
+            st.session_state.chat_open = False
+    with chat_help_col:
+        st.markdown(
+            '<span class="ainoc-chat-help">?'
+            '<span class="ainoc-chat-tooltip">'
+            'Seleccioná un evento o grupo, escribí tu pregunta y recibí '
+            'una explicación detallada. Podés pegar logs adicionales con '
+            'el botón 📎 para dar más contexto.'
+            '</span></span>',
+            unsafe_allow_html=True,
+        )
+
+    if st.session_state.chat_open:
+        if "chat_messages" not in st.session_state:
+            st.session_state.chat_messages = []
+
+        # Selector de destino del chat
+        chat_dest = st.radio(
+            "Consultar sobre",
+            ["Evento individual", "Grupo de correlación"],
+            horizontal=True,
+            key="chat_dest",
+        )
+
+        # Cargar opciones
+        chat_options = {}
+        if chat_dest == "Evento individual":
+            try:
+                resp_ev = httpx.get(
+                    f"{BACKEND_URL}/events",
+                    params={"limit": 100, "sort_by": "id", "sort_dir": "desc"},
+                    timeout=5,
+                    trust_env=False,
+                )
+                for ev in resp_ev.json().get("items", []):
+                    ts = ev["received_at"][:16].replace("T", " ") if ev.get("received_at") else "?"
+                    sev = SEVERITY_COLORS.get(ev.get("severity", ""), "⚪")
+                    etype = ev.get("event_type") or "sin analizar"
+                    chat_options[f"#{ev['id']} — {ts} — {sev} {etype}"] = ev["id"]
+            except httpx.HTTPError:
+                st.info("No se pudieron cargar los eventos.")
+        else:
+            try:
+                resp_gr = httpx.get(
+                    f"{BACKEND_URL}/events/correlation-history",
+                    params={"limit": 50},
+                    timeout=5,
+                    trust_env=False,
+                )
+                for g in resp_gr.json().get("groups", []):
+                    pat = PATTERN_ICONS.get(g.get("pattern"), "❓")
+                    ips = ", ".join(g.get("attacker_ips", []))
+                    chat_options[f"Grupo #{g['correlation_group']} — {pat} {ips} ({g['event_count']} evt.)"] = g[
+                        "correlation_group"
+                    ]
+            except httpx.HTTPError:
+                st.info("No hay grupos de correlación disponibles.")
+
+        if chat_options:
+            selected_label = st.selectbox("Destino", list(chat_options.keys()), key="chat_target")
+            selected_id = chat_options[selected_label]
+        else:
+            st.info("No hay datos disponibles para chatear.")
+            selected_id = None
+
+        # Preguntas sugeridas
+        if selected_id is not None:
+            st.markdown(
+                '<div class="ainoc-chips">',
+                unsafe_allow_html=True,
+            )
+            chip_cols = st.columns(4)
+            chip_questions = [
+                "🔍 ¿Qué significa este evento?",
+                "⚠️ ¿Es una amenaza real?",
+                "🛡️ ¿Qué debo hacer ahora?",
+                "📊 ¿Por qué se clasificó así?",
+            ]
+            for i, q in enumerate(chip_questions):
+                with chip_cols[i]:
+                    if st.button(q, key=f"chip_{i}", use_container_width=True):
+                        st.session_state["chat_pending_msg"] = q
+                        st.rerun()
+            st.markdown("</div>", unsafe_allow_html=True)
+
+        # Mostrar historial del chat
+        for msg in st.session_state.chat_messages:
+            if msg["role"] == "user":
+                with st.chat_message("user"):
+                    st.markdown(f'<div class="ainoc-msg-user">{msg["content"]}</div>', unsafe_allow_html=True)
+            else:
+                with st.chat_message("assistant"):
+                    st.markdown(f'<div class="ainoc-msg-ai">{msg["content"]}</div>', unsafe_allow_html=True)
+
+        # Input del chat (st.chat_input siempre al fondo)
+        if prompt := st.chat_input("Preguntale al copiloto..."):
+            st.session_state["chat_pending_msg"] = prompt
+            st.rerun()
+
+        # Procesar mensajes pendientes (de chips o del input)
+        pending = st.session_state.pop("chat_pending_msg", None)
+        if pending and selected_id is not None:
+            # Attach de logs
+            with st.expander("📎 Adjuntar logs adicionales (opcional)", expanded=False):
+                attach = st.text_area(
+                    "Pegar líneas de log para agregar contexto",
+                    height=80,
+                    placeholder="Aug 19 12:00:00 pfsense-prod filterlog: ...",
+                    key="chat_attach",
+                )
+
+            user_message = pending
+            if attach and attach.strip():
+                user_message += "\n\n---\n**Logs adicionales adjuntados:**\n```\n" + attach.strip() + "\n```"
+
+            st.session_state.chat_messages.append({"role": "user", "content": user_message})
+
+            with st.chat_message("user"):
+                st.markdown(f'<div class="ainoc-msg-user">{user_message}</div>', unsafe_allow_html=True)
+
+            with st.chat_message("assistant"), st.spinner("Consultando al modelo..."):
+                # Armar contexto del sistema
+                system_parts = [
+                    (
+                        "Eres un analista de seguridad de redes (copiloto NOC local). "
+                        "Tu rol es enseñar y aconsejar al administrador. "
+                        "Responde en español, de forma técnica pero clara. "
+                        "NUNCA inventes IPs, puertos, ni contexto de red que no esté en los datos reales."
+                    ),
+                ]
+
+                try:
+                    if chat_dest == "Evento individual":
+                        ev_data = httpx.get(
+                            f"{BACKEND_URL}/events/{selected_id}",
+                            timeout=5,
+                            trust_env=False,
+                        ).json()
+                        system_parts.append(f"Evento de log crudo:\n{ev_data.get('raw_message', '')}")
+                        if ev_data.get("analyzed"):
+                            system_parts.append(
+                                f"Análisis previo: severidad={ev_data.get('severity')}, "
+                                f"tipo={ev_data.get('event_type')}.\n"
+                                f"Explicación: {ev_data.get('ai_explanation', '')}"
+                            )
+                        if ev_data.get("correlation_group") is not None:
+                            gr_data = httpx.get(
+                                f"{BACKEND_URL}/events/correlation-history",
+                                params={"limit": 50},
+                                timeout=5,
+                                trust_env=False,
+                            ).json()
+                            for g in gr_data.get("groups", []):
+                                if g["correlation_group"] == ev_data["correlation_group"]:
+                                    system_parts.append(
+                                        f"Grupo de correlación #{g['correlation_group']}: "
+                                        f"{g['event_count']} eventos, patrón={g.get('pattern', 'indeterminado')}."
+                                    )
+                                    break
+                    else:
+                        gr_data = httpx.get(
+                            f"{BACKEND_URL}/events/correlation-history",
+                            params={"limit": 50},
+                            timeout=5,
+                            trust_env=False,
+                        ).json()
+                        for g in gr_data.get("groups", []):
+                            if g["correlation_group"] == selected_id:
+                                system_parts.append(
+                                    f"Grupo de correlación #{selected_id}:\n"
+                                    f"IP(s) atacante(s): {', '.join(g.get('attacker_ips', []))}\n"
+                                    f"Patrón: {g.get('pattern', 'indeterminado')}\n"
+                                    f"Cantidad de eventos: {g['event_count']}\n"
+                                    f"Severidad: {g.get('severity', 'low')}"
+                                )
+                                break
+                except httpx.HTTPError:
+                    system_parts.append("(No se pudo cargar el contexto detallado del destino)")
+
+                system_message = "\n\n".join(system_parts)
+                messages = [{"role": "system", "content": system_message}] + st.session_state.chat_messages
+
+                # Streaming de la respuesta
+                import time as _time
+
+                t0 = _time.perf_counter()
+
+                def _chat_stream():
+                    with httpx.stream(
+                        "POST",
+                        f"{BACKEND_URL}/events/{selected_id}/chat",
+                        json={"message": user_message, "history": st.session_state.chat_messages[:-1]},
+                        timeout=120,
+                        trust_env=False,
+                    ) as resp:
+                        for chunk in resp.iter_text():
+                            if chunk:
+                                yield chunk
+
+                response = st.write_stream(_chat_stream())
+                elapsed = _time.perf_counter() - t0
+
+                st.session_state.chat_messages.append({"role": "assistant", "content": response})
+                st.caption(f"⏱️ {elapsed:.1f}s")

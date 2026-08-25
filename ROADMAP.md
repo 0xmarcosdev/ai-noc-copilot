@@ -121,15 +121,35 @@ en vez de depender de recrear la base — ver limitación documentada en
 > #12 (reporte on-demand sobre un paquete de logs ingerido o filtrado).
 
 - [x] Panel de estadísticas enriquecido (más allá de `by_severity` /
-`top_high_severity_types`): series por tiempo, distribución por tipo de
-evento, eventos correlacionados vs individuales
+  `top_high_severity_types`): series por tiempo, distribución por tipo de
+  evento, eventos correlacionados vs individuales
 - [x] Gráficos interactivos con plotly (offline, sin CDN — instalado via
-pip, 100% funcional sin red. Documentado en SPEC §5)
+  pip, 100% funcional sin red. Documentado en SPEC §5)
 - [x] Exportar datos (CSV/JSON) desde el dashboard — filtros activos
 - [x] Botón de reporte on-demand: genera un resumen determinista
-(agregaciones/estadísticas) sobre los eventos filtrados o el último lote
-ingerido (sin pasar por LLM — decision documentada en SPEC §5)
+  (agregaciones/estadísticas) sobre los eventos filtrados o el último lote
+  ingerido (sin pasar por LLM — decision documentada en SPEC §5)
 - [x] Tests para endpoint /summary extendido (31/31 en verde, ruff limpio)
+
+## Fase 5.10 — Chat interactivo con el LLM ⬜ PENDIENTE (UI)
+
+> Chat interactivo sobre eventos individuales: el usuario selecciona un
+> evento y puede preguntarle al copiloto en lenguaje natural. Backend
+> completado (endpoint, streaming, tests); la UI del dashboard queda
+> pendiente de decisión del humano (ver preguntas en PARTB-QUESTIONS).
+
+- [x] `chat_service.py`: async generator que llama a Ollama `/api/chat`
+  con `stream=true`, reutiliza `_ollama_client_kwargs()` y `keep_alive=10m`
+- [x] Endpoint `POST /events/{event_id}/chat`: recibe `{message, history}`,
+  arma system prompt con contexto real del evento (raw_message, análisis
+  previo si existe, info de correlación si pertenece a un grupo),
+  devuelve `StreamingResponse`
+- [x] Validación pre-stream: lee el primer chunk antes de enviar el
+  status 200 para poder devolver502 limpio si Ollama falla
+- [x] Tests: 404 evento inexistente, contexto en system prompt, usa
+  `/api/chat` (no `/api/generate`), propagación de error 502
+- [x] pytest 37/37, ruff limpio
+- [ ] UI del dashboard (pendiente de decisión — ver abajo)
 
 ## Fase 6 — Documentación y entrega ⬜ PENDIENTE
 

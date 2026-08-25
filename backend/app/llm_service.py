@@ -11,11 +11,17 @@ import os
 from pathlib import Path
 
 import httpx
+from sqlmodel import Session, create_engine
+
+from app.models import LLMTiming
 
 logger = logging.getLogger("ai-noc.llm")
 
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://127.0.0.1:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "my-qwen-3b:latest")
+
+_DB_PATH = Path(os.getenv("DB_PATH", "./data/events.db")).resolve()
+_llm_engine = create_engine(f"sqlite:///{_DB_PATH}", connect_args={"check_same_thread": False})
 
 PROMPT_PATH = Path(__file__).parent / "prompts" / "threat_explainer.txt"
 PROMPT_TEMPLATE = PROMPT_PATH.read_text(encoding="utf-8")
@@ -43,6 +49,7 @@ async def _call_ollama(
     *,
     keep_alive: str = "10m",
     num_predict: int = 400,
+    mode: str = "explain_event",
 ) -> dict:
     """
     Helper compartido por todas las funciones públicas. Envía el prompt a
@@ -98,6 +105,24 @@ async def _call_ollama(
         tok_s,
     )
 
+    # --- Persistir métricas en SQLite ---
+    try:
+        with Session(_llm_engine) as session:
+            session.add(LLMTiming(
+                total_seconds=total_s,
+                load_seconds=load_s,
+                prompt_eval_seconds=prompt_eval_s,
+                prompt_eval_tokens=prompt_eval_count,
+                gen_seconds=gen_s,
+                gen_tokens=eval_count,
+                tokens_per_second=tok_s,
+                model=OLLAMA_MODEL,
+                mode=mode,
+            ))
+            session.commit()
+    except Exception:
+        logger.warning("No se pudo persistir LLMTiming (BD no disponible)", exc_info=True)
+
     # --- Parseo de respuesta ---
     raw_text = result.get("response", "")
     try:
@@ -119,7 +144,7 @@ async def explain_event(log_raw: str) -> dict:
     para que el endpoint decida cómo degradar (ver main.py).
     """
     prompt = PROMPT_TEMPLATE.format(log_raw=log_raw)
-    return await _call_ollama(prompt)
+    return await _call_ollama(prompt, mode="explain_event")
 
 
 async def explain_correlated_events(logs: str, count: int) -> dict:
@@ -129,4 +154,4 @@ async def explain_correlated_events(logs: str, count: int) -> dict:
     SPEC.md §7 -- resuelve la limitación de análisis evento-por-evento).
     """
     prompt = CORRELATION_PROMPT_TEMPLATE.format(logs=logs, count=count)
-    return await _call_ollama(prompt)
+    return await _call_ollama(prompt, mode="explain_correlated")

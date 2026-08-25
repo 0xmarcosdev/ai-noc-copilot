@@ -12,14 +12,16 @@ from dotenv import load_dotenv
 load_dotenv()  # carga backend/.env si existe -- evita usar export/set a mano en cada terminal
 
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, BeforeValidator
 from sqlalchemy import func
 from sqlmodel import Session, SQLModel, create_engine, select
 
+from app.chat_service import chat_stream
 from app.dns_heuristics import looks_like_dga
 from app.dns_parsing import extract_dns_query
 from app.llm_service import LLMAnalysisError, explain_correlated_events, explain_event
-from app.models import NetworkEvent
+from app.models import LLMTiming, NetworkEvent
 from app.syslog_listener import start_syslog_listener
 
 logging.basicConfig(level=logging.INFO)
@@ -260,6 +262,82 @@ async def analyze_event(event_id: int):
         session.commit()
         session.refresh(event)
         return event
+
+
+class ChatRequest(BaseModel):
+    message: str
+    history: list[dict] = []
+
+
+@app.post("/events/{event_id}/chat")
+async def chat_with_event(event_id: int, req: ChatRequest):
+    """Chat interactivo sobre un evento específico. Streaming puro: cada
+    fragmento de la respuesta del LLM se yieldea a medida que Ollama lo
+    genera (ver chat_service.py). No hay estado en el backend -- el
+    frontend manda el historial completo en cada llamada."""
+    with Session(engine) as session:
+        event = session.get(NetworkEvent, event_id)
+        if not event:
+            raise HTTPException(status_code=404, detail="Evento no encontrado")
+
+        # Armar system message con contexto real del evento
+        system_parts = [
+            (
+                "Eres un analista de seguridad de redes (copiloto NOC local). "
+                "Responde en español, de forma directa y técnica. "
+                "NUNCA inventes IPs, puertos, o contexto de red que no esté en los datos reales."
+            ),
+            f"Evento de log crudo:\n{event.raw_message}",
+        ]
+
+        if event.analyzed:
+            system_parts.append(
+                f"Análisis previo del evento: severidad={event.severity}, "
+                f"tipo={event.event_type}.\n"
+                f"Explicación del analista: {event.ai_explanation}"
+            )
+
+        if event.correlation_group is not None:
+            # Buscar info del grupo de correlación
+            group_events = session.exec(
+                select(NetworkEvent).where(
+                    NetworkEvent.correlation_group == event.correlation_group
+                )
+            ).all()
+            port_pattern = classify_port_pattern(group_events)
+            system_parts.append(
+                f"Este evento pertenece al grupo de correlación #{event.correlation_group} "
+                f"con {len(group_events)} eventos relacionados. "
+                f"Patrón clasificado: {port_pattern or 'indeterminado'}."
+            )
+
+        system_message = "\n\n".join(system_parts)
+        messages = [{"role": "system", "content": system_message}] + req.history + [
+            {"role": "user", "content": req.message}
+        ]
+
+    # Validar que Ollama responde ANTES de enviar el status 200.
+    # StreamingResponse compromete el status code inmediatamente; si el
+    # generador falla después, el cliente recibe un stream truncado sin
+    # código de error. Pequeña latencia extra en el primer chunk vale
+    # el trade-off de poder devolver502 limpio.
+    generator = chat_stream(messages)
+    first_chunk = None
+    try:
+        first_chunk = await generator.__anext__()
+    except LLMAnalysisError as exc:
+        logger.error("Chat fallo antes de iniciar stream: %s", exc)
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    async def _chain(first: str, rest):
+        yield first
+        async for chunk in rest:
+            yield chunk
+
+    return StreamingResponse(
+        _chain(first_chunk, generator),
+        media_type="text/plain",
+    )
 
 
 @app.post("/events/correlate")
