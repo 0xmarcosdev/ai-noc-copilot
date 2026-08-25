@@ -774,11 +774,21 @@ with main_col:
                     timeout=5,
                     trust_env=False,
                 )
+                # Cache de eventos para usar en el chat
+                st.session_state["chat_events_cache"] = {}
                 for ev in resp_ev.json().get("items", []):
                     ts = ev["received_at"][:16].replace("T", " ") if ev.get("received_at") else "?"
                     sev = SEVERITY_COLORS.get(ev.get("severity", ""), "⚪")
                     etype = ev.get("event_type") or "sin analizar"
-                    chat_options[f"#{ev['id']} — {ts} — {sev} {etype}"] = ev["id"]
+                    label = f"#{ev['id']} — {ts} — {sev} {etype}"
+                    chat_options[label] = ev["id"]
+                    st.session_state["chat_events_cache"][ev["id"]] = {
+                        "severity": ev.get("severity"),
+                        "event_type": ev.get("event_type"),
+                        "ai_explanation": ev.get("ai_explanation", ""),
+                        "analyzed": ev.get("analyzed", False),
+                        "correlation_group": ev.get("correlation_group"),
+                    }
             except httpx.HTTPError:
                 st.info("No se pudieron cargar los eventos.")
         else:
@@ -789,18 +799,30 @@ with main_col:
                     timeout=5,
                     trust_env=False,
                 )
+                # Cache de grupos para usar en el chat
+                st.session_state["chat_groups_cache"] = {}
                 for g in resp_gr.json().get("groups", []):
                     pat = PATTERN_ICONS.get(g.get("pattern"), "❓")
                     ips = ", ".join(g.get("attacker_ips", []))
-                    chat_options[
-                        f"Grupo #{g['correlation_group']} — {pat} {ips} ({g['event_count']} evt.)"
-                    ] = g["correlation_group"]
+                    label = f"Grupo #{g['correlation_group']} — {pat} {ips} ({g['event_count']} evt.)"
+                    chat_options[label] = g["correlation_group"]
+                    st.session_state["chat_groups_cache"][g["correlation_group"]] = {
+                        "ips": ips,
+                        "pattern": g.get("pattern", "indeterminado"),
+                        "severity": g.get("severity", "low"),
+                        "event_count": g["event_count"],
+                        "unique_ports": len(g.get("unique_ports", [])),
+                    }
             except httpx.HTTPError:
                 st.info("No hay grupos de correlación disponibles.")
 
         if chat_options:
             selected_label = st.selectbox("Destino", list(chat_options.keys()), key="chat_target")
             selected_id = chat_options[selected_label]
+            # Reset del historial si cambia el destino consultado
+            if st.session_state.get("chat_prev_dest") != selected_id:
+                st.session_state.chat_messages = []
+                st.session_state.chat_prev_dest = selected_id
         else:
             st.info("No hay datos disponibles para chatear.")
             selected_id = None
@@ -812,12 +834,26 @@ with main_col:
                 unsafe_allow_html=True,
             )
             chip_cols = st.columns(4)
-            chip_questions = [
-                "🔍 ¿Qué significa este evento?",
-                "⚠️ ¿Es una amenaza real?",
-                "🛡️ ¿Qué debo hacer ahora?",
-                "📊 ¿Por qué se clasificó así?",
-            ]
+            # Chips dinámicos según el destino seleccionado
+            if chat_dest == "Evento individual":
+                ev_cache = st.session_state.get("chat_events_cache", {}).get(selected_id, {})
+                sev = ev_cache.get("severity", "?")
+                chip_questions = [
+                    f"🔍 ¿Qué significa el evento #{selected_id}?",
+                    f"⚠️ ¿Es una amenaza real (sev: {sev})?",
+                    "️ ¿Qué debo hacer ahora?",
+                    f"📊 ¿Por qué severidad '{sev}'?",
+                ]
+            else:
+                gr_cache = st.session_state.get("chat_groups_cache", {}).get(selected_id, {})
+                pattern = gr_cache.get("pattern", "indeterminado")
+                ips = gr_cache.get("ips", "?")
+                chip_questions = [
+                    f" ¿Qué significa el grupo #{selected_id}?",
+                    f"⚠️ ¿Es una amenaza real el patrón '{pattern}'?",
+                    f"🛡️ ¿Qué debo hacer con {ips}?",
+                    f"📊 ¿Por qué se clasificó como '{pattern}'?",
+                ]
             for i, q in enumerate(chip_questions):
                 with chip_cols[i]:
                     if st.button(q, key=f"chip_{i}", use_container_width=True):
@@ -850,8 +886,32 @@ with main_col:
                     placeholder="Aug 19 12:00:00 pfsense-prod filterlog: ...",
                     key="chat_attach",
                 )
-
             user_message = pending
+
+            # Inyectar contexto del destino seleccionado al final del mensaje
+            if chat_dest == "Evento individual" and "chat_events_cache" in st.session_state:
+                ev_cache = st.session_state["chat_events_cache"].get(selected_id, {})
+                ctx = (
+                    f"\n\n---\n**CONTEXTO DEL EVENTO #{selected_id} (usar SOLO esto):**\n"
+                    f"- Severidad: {ev_cache.get('severity', 'sin analizar')}\n"
+                    f"- Tipo: {ev_cache.get('event_type', 'sin clasificar')}\n"
+                    f"- Analizado: {'Sí' if ev_cache.get('analyzed') else 'No'}\n"
+                    f"- Explicación previa: {ev_cache.get('ai_explanation', 'ninguna')[:200]}\n"
+                    f"- Grupo de correlación: {ev_cache.get('correlation_group', 'ninguno')}"
+                )
+                user_message += ctx
+            elif chat_dest == "Grupo de correlación" and "chat_groups_cache" in st.session_state:
+                gr_cache = st.session_state["chat_groups_cache"].get(selected_id, {})
+                ctx = (
+                    f"\n\n---\n**CONTEXTO DEL GRUPO #{selected_id} (usar SOLO esto):**\n"
+                    f"- IP(s) atacante(s): {gr_cache.get('ips', 'desconocida')}\n"
+                    f"- Patrón detectado: {gr_cache.get('pattern', 'indeterminado')}\n"
+                    f"- Severidad: {gr_cache.get('severity', 'low')}\n"
+                    f"- Cantidad de eventos: {gr_cache.get('event_count', 0)}\n"
+                    f"- Puertos únicos: {gr_cache.get('unique_ports', 0)}"
+                )
+                user_message += ctx
+
             if attach and attach.strip():
                 user_message += "\n\n---\n**Logs adicionales adjuntados:**\n```\n" + attach.strip() + "\n```"
 
@@ -864,13 +924,25 @@ with main_col:
                 # Armar contexto del sistema
                 system_parts = [
                     (
-                        "Eres un analista de seguridad de redes (copiloto NOC local). "
-                        "Tu rol es enseñar y aconsejar al administrador. "
-                        "Responde en español, de forma técnica pero clara. "
-                        "NUNCA inventes IPs, puertos, ni contexto de red que no esté en los datos reales."
+                        "Eres un analista SENIOR de seguridad de redes (copiloto NOC local). "
+                        "Tu rol es enseñar y aconsejar al administrador de red.\n\n"
+                        "## REGLAS OBLIGATORIAS\n"
+                        "1. Usa SOLO la información del CONTEXTO que se te proporciona abajo.\n"
+                        "2. NUNCA inventes IPs, puertos, timestamps ni patrones que no aparezcan en el contexto.\n"
+                        "3. Si el contexto dice que el patrón es 'fuerza_bruta', NO digas que es 'indeterminado'. "
+                        "Respeta la clasificación del sistema.\n"
+                        "4. Ignora mensajes anteriores del chat si referencian un evento o grupo diferente al actual.\n"
+                        "5. Responde en español, técnico pero claro.\n"
+                        "6. Si no tienes información suficiente para responder, dilo explícitamente en lugar de inventar.\n\n"
+                        "## FORMATO DE RESPUESTA\n"
+                        "Estructura tu respuesta en estas secciones (usa markdown):\n"
+                        "- **Diagnóstico**: qué está pasando realmente\n"
+                        "- **Evidencia**: datos concretos del contexto (IPs, puertos, cantidad)\n"
+                        "- **Riesgo**: por qué es peligroso (o no)\n"
+                        "- **Acción inmediata**: 2-3 pasos concretos que el administrador debe hacer\n"
+                        "- **Investigación adicional**: qué más revisar si tiene tiempo\n"
                     ),
                 ]
-
                 try:
                     if chat_dest == "Evento individual":
                         ev_data = httpx.get(
