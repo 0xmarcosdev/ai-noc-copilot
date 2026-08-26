@@ -215,6 +215,15 @@ def list_events(
         }
 
 
+@app.get("/events/{event_id}")
+def get_event(event_id: int):
+    with Session(engine) as session:
+        event = session.get(NetworkEvent, event_id)
+        if not event:
+            raise HTTPException(status_code=404, detail="Evento no encontrado")
+        return event
+
+
 class IngestRequest(BaseModel):
     content: str
     source: str = "manual"
@@ -300,9 +309,7 @@ async def chat_with_event(event_id: int, req: ChatRequest):
         if event.correlation_group is not None:
             # Buscar info del grupo de correlación
             group_events = session.exec(
-                select(NetworkEvent).where(
-                    NetworkEvent.correlation_group == event.correlation_group
-                )
+                select(NetworkEvent).where(NetworkEvent.correlation_group == event.correlation_group)
             ).all()
             port_pattern = classify_port_pattern(group_events)
             system_parts.append(
@@ -312,9 +319,11 @@ async def chat_with_event(event_id: int, req: ChatRequest):
             )
 
         system_message = "\n\n".join(system_parts)
-        messages = [{"role": "system", "content": system_message}] + req.history + [
-            {"role": "user", "content": req.message}
-        ]
+        messages = (
+            [{"role": "system", "content": system_message}]
+            + req.history
+            + [{"role": "user", "content": req.message}]
+        )
 
     # Validar que Ollama responde ANTES de enviar el status 200.
     # StreamingResponse compromete el status code inmediatamente; si el
@@ -667,17 +676,16 @@ def summary(hours: int = 24):
                 bucket = e.received_at.strftime("%Y-%m-%d %H:00")
                 hourly_counts[bucket] = hourly_counts.get(bucket, 0) + 1
 
-        time_series = [
-            {"hour": h, "count": hourly_counts[h]}
-            for h in sorted(hourly_counts)
-        ]
+        time_series = [{"hour": h, "count": hourly_counts[h]} for h in sorted(hourly_counts)]
 
         return {
             "total_analyzed": len(events),
             "by_severity": by_severity,
             "top_high_severity_types": [{"event_type": t, "count": c} for t, c in top_high_categories],
-            "by_event_type": [{"event_type": t, "count": c} for t, c in
-                              sorted(by_type.items(), key=lambda kv: kv[1], reverse=True)],
+            "by_event_type": [
+                {"event_type": t, "count": c}
+                for t, c in sorted(by_type.items(), key=lambda kv: kv[1], reverse=True)
+            ],
             "correlated_count": correlated_count,
             "individual_count": len(events) - correlated_count,
             "time_series": time_series,
