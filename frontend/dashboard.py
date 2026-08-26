@@ -85,12 +85,12 @@ def _md_lite_to_html(text: str) -> str:
     # bold ** **
     t = re.sub(r"\*\*([^*]+)\*\*", r"<strong>\1</strong>", t)
     # headers ### ## #
-    t = re.sub(r"^### (.+)$", r'<div class="ainoc-h">\1</div>', t, flags=re.M)
-    t = re.sub(r"^## (.+)$", r'<div class="ainoc-h">\1</div>', t, flags=re.M)
-    t = re.sub(r"^# (.+)$", r'<div class="ainoc-h">\1</div>', t, flags=re.M)
+    t = re.sub(r"^### (.+)$", r'<div class="ainoc-h">\1</div>', t, flags=re.MULTILINE)
+    t = re.sub(r"^## (.+)$", r'<div class="ainoc-h">\1</div>', t, flags=re.MULTILINE)
+    t = re.sub(r"^# (.+)$", r'<div class="ainoc-h">\1</div>', t, flags=re.MULTILINE)
     # list items
-    t = re.sub(r"^- (.+)$", r'<div class="ainoc-li">• \1</div>', t, flags=re.M)
-    t = re.sub(r"^\* (.+)$", r'<div class="ainoc-li">• \1</div>', t, flags=re.M)
+    t = re.sub(r"^- (.+)$", r'<div class="ainoc-li">• \1</div>', t, flags=re.MULTILINE)
+    t = re.sub(r"^\* (.+)$", r'<div class="ainoc-li">• \1</div>', t, flags=re.MULTILINE)
     # paragraphs: double newlines
     parts = re.split(r"\n\n+", t)
     out = []
@@ -1264,45 +1264,59 @@ with tab_chat:
         try:
             resp_gr = httpx.get(
                 f"{BACKEND_URL}/events/correlation-history",
-                params={"limit": 50},
                 timeout=5,
                 trust_env=False,
             )
             groups = resp_gr.json().get("groups") or []
-            found = next((g for g in groups if int(g["correlation_group"]) == selected_id), None)
-            if found:
-                ctx_ok = True
-                ips = ", ".join(found.get("attacker_ips") or [])
-                st.session_state["chat_groups_cache"] = {
-                    selected_id: {
-                        "ips": ips,
-                        "pattern": found.get("pattern") or "indeterminado",
-                        "severity": found.get("severity") or "low",
-                        "event_count": found["event_count"],
-                        "unique_ports": len(found.get("unique_ports") or []),
-                    }
-                }
-                c = st.session_state["chat_groups_cache"][selected_id]
-                st.markdown(
-                    f'<div class="ainoc-context-card"><strong>Grupo #{selected_id}</strong> · '
-                    f"IP(s): {c['ips']} · Patrón: {c['pattern']} · "
-                    f"{c['event_count']} evt · {c['unique_ports']} puertos</div>",
-                    unsafe_allow_html=True,
-                )
-                chips = [
-                    f"¿Qué significa el grupo #{selected_id}?",
-                    f"¿Es una amenaza real el patrón '{c['pattern']}'?",
-                    f"¿Qué debo hacer con {c['ips']}?",
-                    f"¿Por qué se clasificó como '{c['pattern']}'?",
-                ]
-            else:
+
+            if not groups:
                 st.warning(
-                    f"No existe el grupo #{selected_id} en el histórico. "
-                    "Correlacioná eventos o mirá los números en la pestaña Correlación."
+                    "No hay grupos en el histórico. Ve a la pestaña 'Correlación' y correlaciona eventos primero."
                 )
+                ctx_ok = False
+            else:
+                # Crear opciones legibles para el selectbox
+                group_options = {
+                    f"Grupo #{g['correlation_group']} ({g['event_count']} evt, {g.get('pattern', 'indeterminado')})": g[
+                        "correlation_group"
+                    ]
+                    for g in groups
+                }
+
+                # Usar selectbox en lugar de number_input a ciegas
+                selected_label = st.selectbox(
+                    "Seleccionar grupo del histórico", list(group_options.keys()), key="chat_group_select"
+                )
+                selected_id = group_options[selected_label]
+
+                found = next((g for g in groups if g["correlation_group"] == selected_id), None)
+                if found:
+                    ctx_ok = True
+                    ips = ", ".join(found.get("attacker_ips") or [])
+                    st.session_state["chat_groups_cache"] = {
+                        selected_id: {
+                            "ips": ips,
+                            "pattern": found.get("pattern") or "indeterminado",
+                            "severity": found.get("severity") or "low",
+                            "event_count": found["event_count"],
+                            "unique_ports": len(found.get("unique_ports") or []),
+                        }
+                    }
+                    c = st.session_state["chat_groups_cache"][selected_id]
+                    st.markdown(
+                        f'<div class="ainoc-context-card"><strong>Grupo #{selected_id}</strong> · '
+                        f"IP(s): {c['ips']} · Patrón: {c['pattern']} · "
+                        f"{c['event_count']} evt · {c['unique_ports']} puertos</div>",
+                        unsafe_allow_html=True,
+                    )
+                    chips = [
+                        f"¿Qué significa el grupo #{selected_id}?",
+                        f"¿Es una amenaza real el patrón '{c['pattern']}'?",
+                        f"¿Qué debo hacer con {c['ips']}?",
+                        f"¿Por qué se clasificó como '{c['pattern']}'?",
+                    ]
         except httpx.HTTPError:
             st.warning("No se pudo cargar el histórico de correlación.")
-
     if ctx_ok:
         cc = st.columns(4)
         for i, q in enumerate(chips):
@@ -1447,6 +1461,7 @@ with tab_corr:
                         st.markdown(f"**Acción:** {group['recommended_action']}")
                         with st.popover("IDs"):
                             st.caption(", ".join(map(str, group["event_ids"])))
+                st.rerun()
 
     st.divider()
     st.markdown("### Histórico de correlación")
@@ -1455,7 +1470,6 @@ with tab_corr:
     try:
         history = httpx.get(
             f"{BACKEND_URL}/events/correlation-history",
-            params={"limit": 50},
             timeout=10,
             trust_env=False,
         ).json()

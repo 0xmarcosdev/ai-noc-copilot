@@ -5,6 +5,7 @@ Un NetworkEvent representa una línea de log normalizada, típicamente
 proveniente del syslog de pfSense (bloqueos de firewall, caídas de VPN,
 intentos de conexión, etc.).
 """
+
 from datetime import datetime
 
 from sqlmodel import Field, SQLModel
@@ -29,6 +30,7 @@ class LLMTiming(SQLModel, table=True):
     Se escribe desde _call_ollama() en llm_service.py y se consulta desde
     el endpoint GET /performance/history y el dashboard de rendimiento.
     """
+
     id: int | None = Field(default=None, primary_key=True)
     timestamp: datetime = Field(default_factory=datetime.utcnow, index=True)
     total_seconds: float = 0.0

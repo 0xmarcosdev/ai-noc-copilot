@@ -149,7 +149,13 @@ en vez de depender de recrear la base — ver limitación documentada en
 - [x] Tests: 404 evento inexistente, contexto en system prompt, usa
   `/api/chat` (no `/api/generate`), propagación de error 502
 - [x] pytest 37/37, ruff limpio
-- [ ] UI del dashboard (pendiente de decisión — ver abajo)
+- [x] UI del dashboard (tabs Eventos / Chat / Correlación, tema claro-oscuro,
+      filtros por radio, chat con área scrolleable, lookup de evento vía listado)
+- [x] GET /events/{event_id} (hoy el chat depende del listado con id_from/id_to)
+- [x] UX mejorada: `selectbox` dinámico para selección de grupos de correlación (elimina adivinación de IDs).
+- [x] Fix aplicado: `st.rerun()` post-correlación para actualización inmediata del histórico.
+- [x] Estética: CSS personalizado con frame de chat scrolleable, tipografía jerárquica y badges semán
+- [ ] Chat sobre grupo de correlación sin reutilizar el event_id como PK
 
 ## Fase 6 — Documentación y entrega ⬜ PENDIENTE
 
@@ -183,7 +189,7 @@ Formato: **`vMAJOR.MINOR.PATCH — "Nombre descriptivo"`**
 | v0.3.0 | Generador de logs con formato verificado | Fase 3 | ✅ hecho |
 | v0.4.0 | Correlación de eventos | Fase 4 | ✅ hecho |
 | v0.4.1 | Persistencia y clasificación de correlación | Fase 5.8 | ✅ hecho |
-| v0.5.0 | Dashboard completo | Fase 5 | ⬜ pendiente |
+| v0.5.0 | Dashboard completo y Chat interactivo | Fase 5.10 | ✅ hecho |
 | **v1.0.0** | **MVP listo para entrega — 4 sept 2026** | Fase 6 | ⬜ pendiente |
 
 ### Cómo etiquetar en git

@@ -6,6 +6,7 @@ Tests mínimos para cumplir el requisito de testing del curso:
 
 Correr con: pytest backend/tests -v
 """
+
 import os
 import tempfile
 
@@ -65,25 +66,31 @@ def test_list_events(seed_event):
 def test_list_events_pagination_and_filters():
     """Paginación (limit/offset) + filtros q / severity / only_unanalyzed / event_type."""
     with Session(engine) as session:
-        session.add(NetworkEvent(
-            source_ip="10.0.0.1",
-            raw_message="filterlog block from 203.0.113.50 to internal",
-            severity="high",
-            event_type="fuerza bruta SSH",
-            analyzed=True,
-        ))
-        session.add(NetworkEvent(
-            source_ip="10.0.0.2",
-            raw_message="filterlog pass out to 8.8.8.8",
-            severity="low",
-            event_type="trafico normal",
-            analyzed=True,
-        ))
-        session.add(NetworkEvent(
-            source_ip="10.0.0.3",
-            raw_message="sin analizar todavia 203.0.113.99",
-            analyzed=False,
-        ))
+        session.add(
+            NetworkEvent(
+                source_ip="10.0.0.1",
+                raw_message="filterlog block from 203.0.113.50 to internal",
+                severity="high",
+                event_type="fuerza bruta SSH",
+                analyzed=True,
+            )
+        )
+        session.add(
+            NetworkEvent(
+                source_ip="10.0.0.2",
+                raw_message="filterlog pass out to 8.8.8.8",
+                severity="low",
+                event_type="trafico normal",
+                analyzed=True,
+            )
+        )
+        session.add(
+            NetworkEvent(
+                source_ip="10.0.0.3",
+                raw_message="sin analizar todavia 203.0.113.99",
+                analyzed=False,
+            )
+        )
         session.commit()
 
     client = TestClient(app)
@@ -170,7 +177,9 @@ def test_list_events_date_range_filter():
             session.add(e)
             session.commit()
             session.refresh(e)
-            events[name] = e.id  # capturar el id DENTRO de la sesión (tras commit la instancia queda detached)
+            events[name] = (
+                e.id
+            )  # capturar el id DENTRO de la sesión (tras commit la instancia queda detached)
         offsets = {"viejo": -10, "medio": -5, "futuro": 10}
         for name, days in offsets.items():
             db_event = session.get(NetworkEvent, events[name])
@@ -204,13 +213,15 @@ def test_list_events_sort_params():
     """sort_by/sort_dir ordenan por el campo pedido; valor inválido -> 422."""
     with Session(engine) as session:
         for sev in ("low", "high", "medium"):
-            session.add(NetworkEvent(
-                source_ip="192.0.2.70",
-                raw_message=f"evento sort {sev}",
-                severity=sev,
-                event_type="tipo sort",
-                analyzed=True,
-            ))
+            session.add(
+                NetworkEvent(
+                    source_ip="192.0.2.70",
+                    raw_message=f"evento sort {sev}",
+                    severity=sev,
+                    event_type="tipo sort",
+                    analyzed=True,
+                )
+            )
         session.commit()
 
     client = TestClient(app)
@@ -240,14 +251,17 @@ def test_list_events_sort_params():
 def test_list_events_empty_string_params_are_tolerated():
     """Strings vacíos en params opcionales se tratan como None (no 422)."""
     client = TestClient(app)
-    resp = client.get("/events", params={
-        "id_from": "",
-        "id_to": "",
-        "received_at_from": "",
-        "received_at_to": "",
-        "q": "",
-        "severity": "",
-    })
+    resp = client.get(
+        "/events",
+        params={
+            "id_from": "",
+            "id_to": "",
+            "received_at_from": "",
+            "received_at_to": "",
+            "q": "",
+            "severity": "",
+        },
+    )
     assert resp.status_code == 200
     assert "items" in resp.json()
 
@@ -264,6 +278,7 @@ def test_analyze_event_ollama_down(monkeypatch, seed_event):
 
     async def fake_explain_event(log_raw: str):
         from app.llm_service import LLMAnalysisError
+
         raise LLMAnalysisError("Ollama no respondió (simulado en test)")
 
     monkeypatch.setattr(main_module, "explain_event", fake_explain_event)
@@ -296,10 +311,12 @@ def test_correlate_groups_by_attacker_ip(monkeypatch):
 
     with Session(engine) as session:
         for i in range(6):
-            session.add(NetworkEvent(
-                source_ip="192.0.2.1",
-                raw_message=_raw_message_with_attacker_ip("203.0.113.200", i),
-            ))
+            session.add(
+                NetworkEvent(
+                    source_ip="192.0.2.1",
+                    raw_message=_raw_message_with_attacker_ip("203.0.113.200", i),
+                )
+            )
         session.commit()
 
     client = TestClient(app)
@@ -315,10 +332,12 @@ def test_correlate_groups_by_attacker_ip(monkeypatch):
 def test_correlate_below_threshold_returns_no_groups():
     """Un solo evento no alcanza el umbral -> no se marca ningun grupo."""
     with Session(engine) as session:
-        session.add(NetworkEvent(
-            source_ip="192.0.2.1",
-            raw_message=_raw_message_with_attacker_ip("198.51.100.9", 0),
-        ))
+        session.add(
+            NetworkEvent(
+                source_ip="192.0.2.1",
+                raw_message=_raw_message_with_attacker_ip("198.51.100.9", 0),
+            )
+        )
         session.commit()
 
     client = TestClient(app)
@@ -338,10 +357,12 @@ def test_correlate_ignores_groups_below_threshold(monkeypatch):
 
     with Session(engine) as session:
         for i in range(2):  # por debajo del default (5)
-            session.add(NetworkEvent(
-                source_ip="192.0.2.1",
-                raw_message=_raw_message_with_attacker_ip("203.0.113.88", i),
-            ))
+            session.add(
+                NetworkEvent(
+                    source_ip="192.0.2.1",
+                    raw_message=_raw_message_with_attacker_ip("203.0.113.88", i),
+                )
+            )
         session.commit()
 
     client = TestClient(app)
@@ -354,8 +375,10 @@ def test_extract_attacker_ip():
     """La extracción de IP debe leer el campo srcip real, no source_ip del paquete UDP."""
     from app.main import extract_attacker_ip
 
-    raw = ("Aug 16 00:00:00 pfsense-prod filterlog: 1,,,1000000000,em0,match,block,in,4,"
-           "0x0,,64,1000,0,DF,6,tcp,50,203.0.113.77,192.168.10.5,40000,22,0,S,1,,65535,,mss")
+    raw = (
+        "Aug 16 00:00:00 pfsense-prod filterlog: 1,,,1000000000,em0,match,block,in,4,"
+        "0x0,,64,1000,0,DF,6,tcp,50,203.0.113.77,192.168.10.5,40000,22,0,S,1,,65535,,mss"
+    )
     assert extract_attacker_ip(raw) == "203.0.113.77"
     assert extract_attacker_ip("openvpn[1]: Inactivity timeout, restarting") is None
 
@@ -473,19 +496,25 @@ def test_detect_suspicious_dns_flags_multiple_dga_domains(monkeypatch):
     monkeypatch.setattr(main_module, "explain_correlated_events", fake_explain_correlated_events)
 
     dga_domains = [
-        "kj3h9fkj2h7glabc9wq.top", "9zxpq7fmvbn3hslk2ab.xyz",
-        "a8k2j9h6g5f4d3s2a1z.info", "mm3n2b1v9c8x7z6a5s4.biz",
+        "kj3h9fkj2h7glabc9wq.top",
+        "9zxpq7fmvbn3hslk2ab.xyz",
+        "a8k2j9h6g5f4d3s2a1z.info",
+        "mm3n2b1v9c8x7z6a5s4.biz",
     ]
     with Session(engine) as session:
         for i, domain in enumerate(dga_domains):
-            session.add(NetworkEvent(
-                source_ip="192.168.10.22",
-                raw_message=_dns_dga_message("192.168.10.22", domain, i),
-            ))
+            session.add(
+                NetworkEvent(
+                    source_ip="192.168.10.22",
+                    raw_message=_dns_dga_message("192.168.10.22", domain, i),
+                )
+            )
         session.commit()
 
     client = TestClient(app)
-    resp = client.post("/events/detect-suspicious-dns", params={"window_minutes": 30, "min_distinct_domains": 3})
+    resp = client.post(
+        "/events/detect-suspicious-dns", params={"window_minutes": 30, "min_distinct_domains": 3}
+    )
     assert resp.status_code == 200
     data = resp.json()
     assert data["groups_detected"] == 1
@@ -496,14 +525,18 @@ def test_detect_suspicious_dns_flags_multiple_dga_domains(monkeypatch):
 def test_detect_suspicious_dns_ignores_legit_domains():
     with Session(engine) as session:
         for i, domain in enumerate(["google.com", "microsoft.com", "github.com"]):
-            session.add(NetworkEvent(
-                source_ip="192.168.10.40",
-                raw_message=_dns_dga_message("192.168.10.40", domain, i),
-            ))
+            session.add(
+                NetworkEvent(
+                    source_ip="192.168.10.40",
+                    raw_message=_dns_dga_message("192.168.10.40", domain, i),
+                )
+            )
         session.commit()
 
     client = TestClient(app)
-    resp = client.post("/events/detect-suspicious-dns", params={"window_minutes": 30, "min_distinct_domains": 3})
+    resp = client.post(
+        "/events/detect-suspicious-dns", params={"window_minutes": 30, "min_distinct_domains": 3}
+    )
     assert resp.status_code == 200
     assert resp.json()["groups_detected"] == 0
 
@@ -592,10 +625,12 @@ def test_classify_port_pattern_brute_force():
     from app.main import classify_port_pattern
 
     events = [
-        SimpleNamespace(raw_message=(
-            f"Aug 16 00:00:{i:02d} pfsense filterlog: 1,,,10000000,em0,match,block,in,4,"
-            f"0x0,,64,1000,0,DF,6,tcp,60,192.0.2.1,192.168.10.5,4000{i},22,0,S,1,,65535"
-        ))
+        SimpleNamespace(
+            raw_message=(
+                f"Aug 16 00:00:{i:02d} pfsense filterlog: 1,,,10000000,em0,match,block,in,4,"
+                f"0x0,,64,1000,0,DF,6,tcp,60,192.0.2.1,192.168.10.5,4000{i},22,0,S,1,,65535"
+            )
+        )
         for i in range(5)
     ]
     assert classify_port_pattern(events) == "fuerza_bruta"
@@ -608,10 +643,12 @@ def test_classify_port_pattern_port_scan():
     from app.main import classify_port_pattern
 
     events = [
-        SimpleNamespace(raw_message=(
-            f"Aug 16 00:00:{i:02d} pfsense filterlog: 1,,,10000000,em0,match,block,in,4,"
-            f"0x0,,64,1000,0,DF,6,tcp,60,192.0.2.1,192.168.10.5,4000,{1000 + i * 100},0,S,1,,65535"
-        ))
+        SimpleNamespace(
+            raw_message=(
+                f"Aug 16 00:00:{i:02d} pfsense filterlog: 1,,,10000000,em0,match,block,in,4,"
+                f"0x0,,64,1000,0,DF,6,tcp,60,192.0.2.1,192.168.10.5,4000,{1000 + i * 100},0,S,1,,65535"
+            )
+        )
         for i in range(6)
     ]
     assert classify_port_pattern(events) == "escaneo_puertos"
@@ -624,14 +661,18 @@ def test_classify_port_pattern_ambiguous():
     from app.main import classify_port_pattern
 
     events = [
-        SimpleNamespace(raw_message=(
-            "Aug 16 00:00:00 pfsense filterlog: 1,,,10000000,em0,match,block,in,4,"
-            "0x0,,64,1000,0,DF,6,tcp,60,192.0.2.1,192.168.10.5,4000,22,0,S,1,,65535"
-        )),
-        SimpleNamespace(raw_message=(
-            "Aug 16 00:00:01 pfsense filterlog: 1,,,10000000,em0,match,block,in,4,"
-            "0x0,,64,1000,0,DF,6,tcp,60,192.0.2.1,192.168.10.5,4001,80,0,S,1,,65535"
-        )),
+        SimpleNamespace(
+            raw_message=(
+                "Aug 16 00:00:00 pfsense filterlog: 1,,,10000000,em0,match,block,in,4,"
+                "0x0,,64,1000,0,DF,6,tcp,60,192.0.2.1,192.168.10.5,4000,22,0,S,1,,65535"
+            )
+        ),
+        SimpleNamespace(
+            raw_message=(
+                "Aug 16 00:00:01 pfsense filterlog: 1,,,10000000,em0,match,block,in,4,"
+                "0x0,,64,1000,0,DF,6,tcp,60,192.0.2.1,192.168.10.5,4001,80,0,S,1,,65535"
+            )
+        ),
     ]
     assert classify_port_pattern(events) is None
 
@@ -665,10 +706,9 @@ def test_correlate_assigns_correlation_group(monkeypatch):
 
     # Verificar que los eventos en la BD tienen el correlation_group asignado
     from sqlmodel import select as sel
+
     with Session(engine) as session:
-        evts = session.exec(
-            sel(NetworkEvent).where(NetworkEvent.correlation_group == gid)
-        ).all()
+        evts = session.exec(sel(NetworkEvent).where(NetworkEvent.correlation_group == gid)).all()
         assert len(evts) >= 5
 
 
@@ -676,13 +716,15 @@ def test_correlation_history_returns_groups():
     """GET /events/correlation-history retorna grupos agrupados."""
     with Session(engine) as session:
         for i in range(3):
-            session.add(NetworkEvent(
-                source_ip="10.0.0.1",
-                raw_message=f"evento historial {i}",
-                analyzed=True,
-                severity="high",
-                correlation_group=999,
-            ))
+            session.add(
+                NetworkEvent(
+                    source_ip="10.0.0.1",
+                    raw_message=f"evento historial {i}",
+                    analyzed=True,
+                    severity="high",
+                    correlation_group=999,
+                )
+            )
         session.commit()
 
     client = TestClient(app)
@@ -699,21 +741,25 @@ def test_summary_enriquecido():
     """GET /summary devuelve métricas extendidas: by_event_type, correlacionados, time_series."""
     with Session(engine) as session:
         for i in range(4):
-            session.add(NetworkEvent(
+            session.add(
+                NetworkEvent(
+                    source_ip="192.0.2.1",
+                    raw_message=f"summary test {i}",
+                    severity="high" if i < 2 else "low",
+                    event_type="fuerza bruta SSH",
+                    analyzed=True,
+                    correlation_group=1 if i < 2 else None,
+                )
+            )
+        session.add(
+            NetworkEvent(
                 source_ip="192.0.2.1",
-                raw_message=f"summary test {i}",
-                severity="high" if i < 2 else "low",
-                event_type="fuerza bruta SSH",
+                raw_message="summary test beacon",
+                severity="medium",
+                event_type="posible beaconing",
                 analyzed=True,
-                correlation_group=1 if i < 2 else None,
-            ))
-        session.add(NetworkEvent(
-            source_ip="192.0.2.1",
-            raw_message="summary test beacon",
-            severity="medium",
-            event_type="posible beaconing",
-            analyzed=True,
-        ))
+            )
+        )
         session.commit()
 
     client = TestClient(app)

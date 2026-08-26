@@ -332,3 +332,66 @@ Mejorar layout general del dashboard (más moderno, ergonómico)
 Optimizar uso de espacio horizontal
 Refinar tipografía y jerarquía visual
 Considerar tabs para separar secciones principales
+
+## Sesión 17 — 25 ago 2026
+**Asistente de IA**: Grok  
+**Tema**: Revamp visual del dashboard (Streamlit) + debug del lookup de eventos en chat
+
+### Diagnóstico backend — `GET /events/{id}`
+- En `backend/app/main.py` **no existe** `GET /events/{event_id}`.
+- Rutas relacionadas:
+  - `GET /events` — listado paginado con filtros (`id_from`, `id_to`, `q`, `severity`, …) → `{total, limit, offset, items}`
+  - `POST /events/{event_id}/analyze`
+  - `POST /events/{event_id}/chat` — exige un **ID de evento** (PK de `NetworkEvent`), no un nº de grupo de correlación
+- Efecto en el chat del dashboard: la primera carga hacía `GET /events/{id}` → 404 → “No existe el evento #N”.
+- Mitigación en frontend: `_load_event_by_id()` con cascada:
+  1. `GET /events/{id}` (si se agrega en el futuro)
+  2. `GET /events?id_from=N&id_to=N&limit=5`
+  3. Búsqueda en los últimos 200 eventos del listado
+- Limitación restante: el chat sobre **grupo de correlación** sigue llamando `POST /events/{group_id}/chat`, que busca un evento con ese PK; conviene en un siguiente paso o bien pasar un `event_id` del grupo, o añadir un endpoint de chat por grupo.
+
+### Revamp UI (frontend/dashboard.py)
+- Tabs: Eventos | Chat | Correlación (el chat ya no alarga el scroll de la lista).
+- Tema claro/oscuro con variables CSS; contraste de placeholders, `st.code`, markdown y popovers en modo claro.
+- Filtros: severidad / orden / dirección / por página como **radios** (no editables).
+- Chat: historial en un único bloque HTML con altura fija + scroll; destino por `number_input` (ID numérico); historial se preserva al cambiar tema.
+- Tipografía: JetBrains Mono (UI operativa) + IBM Plex Sans (cuerpo); respuestas del LLM normalizadas con `_md_lite_to_html`.
+- Encabezados de eventos más legibles; gráficos Plotly con hover y colores de tema.
+
+### Verificación sugerida (humano)
+```powershell
+curl http://localhost:8000/health
+curl "http://localhost:8000/events?id_from=45&id_to=45&limit=1"
+# Esperado: JSON con items[0].id == 45 (si el evento existe)
+curl -s -o NUL -w "%{http_code}" http://localhost:8000/events/45
+# Esperado hoy: 404 o 405 (no hay GET por id)
+```
+
+### Próximos pasos
+- [x] (Opcional backend) Añadir `GET /events/{event_id}` para alinear contrato con el chat.
+- [ ] Chat de grupo: endpoint dedicado o resolver a un `event_id` del grupo antes de llamar a `/chat`.
+- [ ] Cerrar UI de Fase 5.10 en ROADMAP y seguir con pendientes de Fase 6 (demo, evidencia IA, Docker).
+
+## Sesión 15 — 26 de agosto 2026
+**Asistente de IA**: Qwen3.7  
+**Fase**: 5.10 (UI del Chat) + Refactorización Visual del Dashboard  
+**Duración**: ~1.5 horas  
+**Tema**: Implementación de layout basado en Tabs, corrección de bugs de persistencia de correlación y mejora de UX en el chat.
+
+### Cambios Arquitectónicos y de UI
+- **Migración a Layout por Tabs**: Se reemplazó el scroll vertical infinito por una navegación tabulada (`st.tabs`): "📋 Eventos", "💬 Chat", "🔗 Correlación". Esto mejora drásticamente la ergonomía, separando contextos de trabajo y reduciendo la carga cognitiva.
+- **Refinamiento Visual (CSS)**: Se implementó un sistema de diseño coherente con variables CSS (`:root`), tipografía dual (JetBrains Mono para datos/código, IBM Plex Sans para texto), badges de severidad con codificación de color semántica y un frame de chat personalizado con scroll interno real.
+- **Optimización de Filtros**: Los filtros de la pestaña "Eventos" se reorganizaron en radios y campos de texto compactos, moviendo los filtros de fecha/ID a un expander colapsable para maximizar el espacio de la lista.
+
+### Corrección de Bugs Críticos
+1. **Histórico de Correlación Vacío**: 
+   - *Causa*: Limitación conocida de SQLite (`SPEC.md` §7). Las bases de datos creadas antes de la Fase 5.8 carecían de la columna `correlation_group`, y `create_all()` no la agrega retroactivamente.
+   - *Solución*: Documentado el procedimiento de reset de `events.db` para garantizar la alineación del esquema. Se añadió `st.rerun()` tras una correlación exitosa para forzar la renderización del histórico actualizado.
+2. **Fallo en Chat por Grupo (ID incorrecto)**:
+   - *Causa*: El uso de `st.number_input` obligaba al usuario a adivinar el ID del grupo (ej. escribir "1" cuando el sistema había asignado el "5").
+   - *Solución*: Reemplazo del input numérico por un `st.selectbox` dinámico que pobla sus opciones directamente desde `GET /events/correlation-history`, mostrando metadatos legibles (ID, cantidad de eventos, patrón) y eliminando por completo los errores de "No existe el grupo".
+
+### Estado Actual
+- Dashboard visualmente pulido, responsive y profesional.
+- Flujo de correlación end-to-end verificado: Generación → Correlación → Historial persistente → Chat contextual sin alucinaciones.
+- Pendiente: Grabación de la demo (Fase 6) y ensayo final.

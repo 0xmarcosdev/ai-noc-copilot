@@ -5,7 +5,7 @@ from collections import defaultdict
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, Literal, Optional
 
 from dotenv import load_dotenv
 
@@ -21,7 +21,7 @@ from app.chat_service import chat_stream
 from app.dns_heuristics import looks_like_dga
 from app.dns_parsing import extract_dns_query
 from app.llm_service import LLMAnalysisError, explain_correlated_events, explain_event
-from app.models import LLMTiming, NetworkEvent
+from app.models import NetworkEvent
 from app.syslog_listener import start_syslog_listener
 
 logging.basicConfig(level=logging.INFO)
@@ -213,6 +213,51 @@ def list_events(
             "offset": offset,
             "items": items,
         }
+
+
+@app.get("/events/correlation-history")
+def correlation_history(limit: Optional[int] = 50):
+    """Historial de grupos de correlación agrupados por correlation_group."""
+    # Si por alguna razón llega None, usamos 50
+    actual_limit = limit if limit is not None else 50
+
+    with Session(engine) as session:
+        events = session.exec(
+            select(NetworkEvent)
+            .where(NetworkEvent.correlation_group.is_not(None))
+            .order_by(NetworkEvent.correlation_group.desc(), NetworkEvent.received_at)
+        ).all()
+
+    groups: dict[int, list[NetworkEvent]] = defaultdict(list)
+    for e in events:
+        groups[e.correlation_group].append(e)
+
+    result = []
+    for gid in sorted(groups, reverse=True):
+        gevents = groups[gid]
+        attacker_ips = set()
+        ports = set()
+        for e in gevents:
+            ip = extract_attacker_ip(e.raw_message)
+            if ip:
+                attacker_ips.add(ip)
+            conn = extract_connection_summary(e.raw_message)
+            if conn:
+                ports.add(conn["dstport"])
+        result.append(
+            {
+                "correlation_group": gid,
+                "event_count": len(gevents),
+                "attacker_ips": sorted(attacker_ips),
+                "unique_ports": sorted(ports),
+                "pattern": classify_port_pattern(gevents),
+                "severity": gevents[0].severity,
+                "first_seen": min(e.received_at for e in gevents).isoformat(),
+                "last_seen": max(e.received_at for e in gevents).isoformat(),
+                "event_ids": [e.id for e in gevents],
+            }
+        )
+    return {"total_groups": len(result), "groups": result[:actual_limit]}
 
 
 @app.get("/events/{event_id}")
@@ -424,55 +469,6 @@ async def correlate_events(window_minutes: int = 10, threshold: int = CORRELATIO
         "groups_detected": len(results),
         "groups": results,
     }
-
-
-@app.get("/events/correlation-history")
-def correlation_history(limit: int = 50):
-    """Historial de grupos de correlación agrupados por correlation_group.
-
-    Retorna los grupos más recientes con metadatos: IP atacante, patrón
-    detectado (fuerza bruta / escaneo), cantidad de eventos, ventana
-    temporal y lista de IDs. Ver SPEC §5.
-    """
-    with Session(engine) as session:
-        events = session.exec(
-            select(NetworkEvent)
-            .where(NetworkEvent.correlation_group.is_not(None))
-            .order_by(NetworkEvent.correlation_group.desc(), NetworkEvent.received_at)
-        ).all()
-
-    groups: dict[int, list[NetworkEvent]] = defaultdict(list)
-    for e in events:
-        groups[e.correlation_group].append(e)
-
-    result = []
-    for gid in sorted(groups, reverse=True):
-        gevents = groups[gid]
-        attacker_ips = set()
-        ports = set()
-        for e in gevents:
-            ip = extract_attacker_ip(e.raw_message)
-            if ip:
-                attacker_ips.add(ip)
-            conn = extract_connection_summary(e.raw_message)
-            if conn:
-                ports.add(conn["dstport"])
-
-        result.append(
-            {
-                "correlation_group": gid,
-                "event_count": len(gevents),
-                "attacker_ips": sorted(attacker_ips),
-                "unique_ports": sorted(ports),
-                "pattern": classify_port_pattern(gevents),
-                "severity": gevents[0].severity,
-                "first_seen": min(e.received_at for e in gevents).isoformat(),
-                "last_seen": max(e.received_at for e in gevents).isoformat(),
-                "event_ids": [e.id for e in gevents],
-            }
-        )
-
-    return {"total_groups": len(result), "groups": result[:limit]}
 
 
 @app.post("/events/detect-beaconing")

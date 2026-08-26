@@ -108,17 +108,19 @@ async def _call_ollama(
     # --- Persistir métricas en SQLite ---
     try:
         with Session(_llm_engine) as session:
-            session.add(LLMTiming(
-                total_seconds=total_s,
-                load_seconds=load_s,
-                prompt_eval_seconds=prompt_eval_s,
-                prompt_eval_tokens=prompt_eval_count,
-                gen_seconds=gen_s,
-                gen_tokens=eval_count,
-                tokens_per_second=tok_s,
-                model=OLLAMA_MODEL,
-                mode=mode,
-            ))
+            session.add(
+                LLMTiming(
+                    total_seconds=total_s,
+                    load_seconds=load_s,
+                    prompt_eval_seconds=prompt_eval_s,
+                    prompt_eval_tokens=prompt_eval_count,
+                    gen_seconds=gen_s,
+                    gen_tokens=eval_count,
+                    tokens_per_second=tok_s,
+                    model=OLLAMA_MODEL,
+                    mode=mode,
+                )
+            )
             session.commit()
     except Exception:
         logger.warning("No se pudo persistir LLMTiming (BD no disponible)", exc_info=True)
