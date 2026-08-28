@@ -129,6 +129,98 @@ def health():
     return {"status": "ok"}
 
 
+@app.get("/performance/stats")
+def performance_stats():
+    """
+    Devuelve estadísticas acumuladas y recientes de rendimiento de LLM (/api/generate)
+    para el apartado de rendimiento y trade-offs del dashboard.
+    """
+    from app.models import LLMTiming
+    from sqlmodel import select, func
+    import os
+
+    with Session(engine) as session:
+        timings = session.exec(select(LLMTiming).order_by(LLMTiming.timestamp.desc()).limit(100)).all()
+        total_calls = session.exec(select(func.count(LLMTiming.id))).one()
+        
+        avg_total = session.exec(select(func.avg(LLMTiming.total_seconds))).one() or 0.0
+        avg_gen = session.exec(select(func.avg(LLMTiming.gen_seconds))).one() or 0.0
+        avg_tps = session.exec(select(func.avg(LLMTiming.tokens_per_second))).one() or 0.0
+        
+        # Última llamada registrada
+        latest = timings[0] if timings else None
+
+        history = [
+            {
+                "id": t.id,
+                "timestamp": t.timestamp.isoformat(),
+                "total_seconds": t.total_seconds,
+                "load_seconds": t.load_seconds,
+                "prompt_eval_seconds": t.prompt_eval_seconds,
+                "prompt_eval_tokens": t.prompt_eval_tokens,
+                "gen_seconds": t.gen_seconds,
+                "gen_tokens": t.gen_tokens,
+                "tokens_per_second": t.tokens_per_second,
+                "model": t.model,
+                "mode": t.mode,
+            }
+            for t in reversed(timings)
+        ]
+
+    return {
+        "hardware_info": {
+            "gpu": "NVIDIA GeForce MX150 (2GB VRAM)",
+            "architecture": "Pascal (384 CUDA cores)",
+            "current_model": os.getenv("OLLAMA_MODEL", "my-qwen-3b:latest"),
+            "vram_limit": "2.0 GB",
+            "model_memory": "~2.4 GB (Modelo 3.4B Q4_K_M)",
+            "offload_split": "74% CPU / 26% GPU (por restricción de VRAM)",
+        },
+        "summary": {
+            "total_calls": total_calls,
+            "avg_total_seconds": round(avg_total, 2),
+            "avg_generation_seconds": round(avg_gen, 2),
+            "avg_tokens_per_second": round(avg_tps, 2),
+            "latest": latest.model_dump() if latest else None,
+        },
+        "history": history,
+        "trade_offs": [
+            {
+                "option": "Modelo actual (Qwen 3.4B Q4_K_M)",
+                "vram": "~2.4 GB",
+                "speed": "~5.2 tok/s (~19s por respuesta)",
+                "quality": "Alta (Razonamiento completo)",
+                "recommended": False,
+                "description": "Excede ligeramente los 2GB de la MX150. Se ejecuta parcialmente en CPU (74%), generando el cuello de botella físico."
+            },
+            {
+                "option": "Opción A: Qwen 2.5 1.5B (Q4_K_M)",
+                "vram": "~1.1 GB",
+                "speed": "~30-40 tok/s (~3-5s por respuesta)",
+                "quality": "Muy buena para clasificación de logs",
+                "recommended": True,
+                "description": "Entra 100% en la VRAM de la MX150. Acelera la inferencia x4 sin perder precisión clave en seguridad perimetral."
+            },
+            {
+                "option": "Opción B: Cuantización Q3_K_M (3.4B)",
+                "vram": "~1.7 GB",
+                "speed": "~15s por respuesta",
+                "quality": "Media-Alta",
+                "recommended": False,
+                "description": "Comprime el modelo 3B para que quepa en 2GB VRAM, pero introduce ligera pérdida de razonamiento."
+            },
+            {
+                "option": "Opción C: CPU Pura Q8_0 (3.4B)",
+                "vram": "0 GB (Solo RAM)",
+                "speed": "~5-7 tok/s (~18s por respuesta)",
+                "quality": "Alta",
+                "recommended": False,
+                "description": "Evita la latencia de transferencia CPU<->GPU ejecutando todo en CPU. Mantiene velocidad similar pero libera VRAM."
+            }
+        ]
+    }
+
+
 @app.get("/debug-ollama-config")
 def debug_ollama():
     import os

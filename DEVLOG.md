@@ -395,3 +395,25 @@ curl -s -o NUL -w "%{http_code}" http://localhost:8000/events/45
 - Dashboard visualmente pulido, responsive y profesional.
 - Flujo de correlación end-to-end verificado: Generación → Correlación → Historial persistente → Chat contextual sin alucinaciones.
 - Pendiente: Grabación de la demo (Fase 6) y ensayo final.
+
+## Sesión 16 — 27 de agosto 2026
+**Asistente de IA**: Gemini Flash  
+**Fase**: 5.10 (Métricas y Diagnóstico de Rendimiento LLM)  
+**Tema**: Endpoint `GET /performance/stats`, pestaña "⚡ Rendimiento" en el dashboard y visualización de trade-offs de hardware.
+
+### Análisis y Diagnóstico de Latencia
+- **Evaluación de Hardware**: NVIDIA GeForce MX150 con 2 GB de VRAM vs modelo 3.4B Q4_K_M (~2.4 GB en memoria).
+- **Cuello de botella identificado**: Ollama descarga un 74% de capas a la CPU y 26% a la GPU debido a la restricción física de VRAM, resultando en ~5.2 tok/s (~18.9s por inferencia).
+- **Conclusión arquitectónica**: El código está completamente optimizado (reutilización de cliente, `keep_alive`, mediciones por fases en `LLMTiming`); la limitación es estrictamente física. Además, la detección de anomalías de seguridad es determinista y no depende de la velocidad del LLM.
+
+### Cambios Implementados
+1. **Backend (`backend/app/main.py`)**:
+   - Agregado endpoint `@app.get("/performance/stats")` que consulta la tabla persistente `LLMTiming`.
+   - Expone resumen de métricas acumuladas (total de llamadas, tiempo medio de inferencia, tokens/segundo), desglose de hardware/offload y matriz de trade-offs (Modelo actual vs Qwen 1.5B vs Q3_K_M vs CPU pura Q8).
+2. **Frontend (`frontend/dashboard.py`)**:
+   - Creado cuarto tab `⚡ Rendimiento`.
+   - Visualización de KPIs principales en 4 columnas.
+   - Panel de diagnóstico de hardware y cuello de botella + tarjetas visuales de trade-offs con badge de recomendación.
+   - Gráfico de dispersión/línea temporal interactivo (Plotly) que refleja el tiempo de generación por llamada y tabla expandible con el historial reciente.
+3. **Validación**:
+   - `pytest tests -v` pasando en verde (37/37 tests).

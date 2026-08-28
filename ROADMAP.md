@@ -131,12 +131,10 @@ en vez de depender de recrear la base — ver limitación documentada en
   ingerido (sin pasar por LLM — decision documentada en SPEC §5)
 - [x] Tests para endpoint /summary extendido (31/31 en verde, ruff limpio)
 
-## Fase 5.10 — Chat interactivo con el LLM ⬜ PENDIENTE (UI)
+## Fase 5.10 — Chat interactivo y Pestaña de Rendimiento ✅ COMPLETA
 
-> Chat interactivo sobre eventos individuales: el usuario selecciona un
-> evento y puede preguntarle al copiloto en lenguaje natural. Backend
-> completado (endpoint, streaming, tests); la UI del dashboard queda
-> pendiente de decisión del humano (ver preguntas en PARTB-QUESTIONS).
+> Chat interactivo sobre eventos individuales y panel de métricas de rendimiento
+> de inferencia LLM y análisis de hardware/trade-offs.
 
 - [x] `chat_service.py`: async generator que llama a Ollama `/api/chat`
   con `stream=true`, reutiliza `_ollama_client_kwargs()` y `keep_alive=10m`
@@ -145,16 +143,18 @@ en vez de depender de recrear la base — ver limitación documentada en
   previo si existe, info de correlación si pertenece a un grupo),
   devuelve `StreamingResponse`
 - [x] Validación pre-stream: lee el primer chunk antes de enviar el
-  status 200 para poder devolver502 limpio si Ollama falla
+  status 200 para poder devolver 502 limpio si Ollama falla
 - [x] Tests: 404 evento inexistente, contexto en system prompt, usa
   `/api/chat` (no `/api/generate`), propagación de error 502
 - [x] pytest 37/37, ruff limpio
-- [x] UI del dashboard (tabs Eventos / Chat / Correlación, tema claro-oscuro,
+- [x] UI del dashboard (tabs Eventos / Chat / Correlación / Rendimiento, tema claro-oscuro,
       filtros por radio, chat con área scrolleable, lookup de evento vía listado)
 - [x] GET /events/{event_id} (hoy el chat depende del listado con id_from/id_to)
 - [x] UX mejorada: `selectbox` dinámico para selección de grupos de correlación (elimina adivinación de IDs).
 - [x] Fix aplicado: `st.rerun()` post-correlación para actualización inmediata del histórico.
-- [x] Estética: CSS personalizado con frame de chat scrolleable, tipografía jerárquica y badges semán
+- [x] Estética: CSS personalizado con frame de chat scrolleable, tipografía jerárquica y badges semánticos.
+- [x] Endpoint `GET /performance/stats` para exponer métricas de `LLMTiming` y diagnóstico de hardware.
+- [x] Tab "⚡ Rendimiento" en el frontend con KPIs, comparativa de trade-offs (MX150 VRAM vs CPU offload) y gráfico dinámico de latencias.
 - [ ] Chat sobre grupo de correlación sin reutilizar el event_id como PK
 
 ## Fase 6 — Documentación y entrega ⬜ PENDIENTE

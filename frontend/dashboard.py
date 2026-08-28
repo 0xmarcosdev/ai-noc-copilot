@@ -696,7 +696,7 @@ with st.expander("📥 Ingesta manual de logs", expanded=False):
             st.warning("Pegá logs o subí un archivo primero.")
     st.caption("Sanitizá IPs internas antes de pegar logs reales (SPEC §8).")
 
-tab_events, tab_chat, tab_corr = st.tabs(["📋 Eventos", "💬 Chat", "🔗 Correlación"])
+tab_events, tab_chat, tab_corr, tab_perf = st.tabs(["📋 Eventos", "💬 Chat", "🔗 Correlación", "⚡ Rendimiento"])
 
 # ── TAB EVENTOS ─────────────────────────────────────────────────────────────
 with tab_events:
@@ -1499,3 +1499,121 @@ with tab_corr:
                 st.markdown(f"**Ventana:** {first} → {last}")
                 with st.popover("IDs"):
                     st.caption(", ".join(map(str, g.get("event_ids") or [])))
+
+
+# ── TAB RENDIMIENTO ──────────────────────────────────────────────────────────
+with tab_perf:
+    st.markdown("### ⚡ Rendimiento del Motor LLM y Hardware")
+    st.caption("Análisis de latencia, uso de hardware (GPU/CPU) y comparativa de trade-offs para el proyecto final.")
+
+    perf_data = None
+    try:
+        perf_resp = httpx.get(f"{BACKEND_URL}/performance/stats", timeout=5, trust_env=False)
+        if perf_resp.status_code == 200:
+            perf_data = perf_resp.json()
+    except httpx.HTTPError:
+        pass
+
+    if not perf_data:
+        st.warning("No se pudo conectar al endpoint de rendimiento del backend.")
+    else:
+        hw = perf_data.get("hardware_info", {})
+        summary_p = perf_data.get("summary", {})
+        history_p = perf_data.get("history", [])
+        trade_offs = perf_data.get("trade_offs", [])
+
+        # Métricas principales
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Hardware", hw.get("gpu", "GPU"), hw.get("architecture", ""))
+        col2.metric("Modelo Activo", hw.get("current_model", ""), hw.get("model_memory", ""))
+        col3.metric("Promedio Inferencia", f"{summary_p.get('avg_generation_seconds', 0)}s", f"{summary_p.get('avg_tokens_per_second', 0)} tok/s")
+        col4.metric("Llamadas Totales", summary_p.get("total_calls", 0), f"Promedio total: {summary_p.get('avg_total_seconds', 0)}s")
+
+        st.divider()
+
+        # Diagnóstico de Hardware y Cuello de Botella
+        c_left, c_right = st.columns([1.2, 1], gap="medium")
+
+        with c_left:
+            st.markdown("#### 🔍 Diagnóstico Físico & Cuello de Botella")
+            st.markdown(
+                f"""
+- **Distribución de Carga (Offload):** `{hw.get('offload_split', '74% CPU / 26% GPU')}`.
+- **Límite de VRAM:** La tarjeta gráfica **{hw.get('gpu')}** cuenta con **2 GB de VRAM**, mientras que el modelo actual pesa **~2.4 GB** en memoria.
+- **Causa Raíz:** Al no caber por completo en la VRAM, Ollama descarga ~74% de las capas a la CPU del sistema, lo que reduce la velocidad de generación a ~5 tok/s (~19s por respuesta).
+- **Determinismo vs IA:** Recordar que la detección de amenazas (beaconing, entropía DGA, escaneos) es **100% determinista** en Python. El LLM actúa únicamente como sintetizador y explicador, por lo que una menor velocidad de inferencia no afecta la precisión de detección.
+                """
+            )
+
+        with c_right:
+            st.markdown("#### ⚖️ Comparativa de Trade-offs y Opciones")
+            for item in trade_offs:
+                badge = "⭐ RECOMENDADO" if item.get("recommended") else "⚪ Alternativa"
+                border_color = "#0891B2" if item.get("recommended") else "#334155"
+                st.markdown(
+                    f"""
+<div style="background: var(--ainoc-panel); border: 1px solid {border_color}; padding: 10px 14px; border-radius: 8px; margin-bottom: 8px;">
+    <strong>{item['option']}</strong> <span style="font-size: 0.75rem; float: right; color: var(--ainoc-muted);">{badge}</span><br>
+    <small style="color: var(--ainoc-accent);">VRAM: {item['vram']} · Velocidad: {item['speed']}</small><br>
+    <span style="font-size: 0.82rem;">{item['description']}</span>
+</div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+
+        st.divider()
+
+        # Gráficos de latencia temporal
+        st.markdown("#### 📈 Historial Dinámico de Tiempos de Respuesta")
+        if not history_p:
+            st.info("Aún no hay llamadas registradas en la base de datos. Generá eventos o realiza consultas para alimentar las estadísticas.")
+        else:
+            import plotly.graph_objects as go
+
+            timestamps = [h["timestamp"][11:19] for h in history_p]
+            gen_secs = [h["gen_seconds"] for h in history_p]
+
+            fig_perf = go.Figure()
+            fig_perf.add_trace(
+                go.Scatter(
+                    x=timestamps,
+                    y=gen_secs,
+                    mode="lines+markers",
+                    name="Generación (s)",
+                    line={"color": "#0891B2", "width": 2},
+                )
+            )
+            fig_perf.update_layout(
+                title={
+                    "text": "Tiempo de Generación por Inferencia (Segundos)",
+                    "font": {"size": 13, "family": "JetBrains Mono", "color": PLOTLY_FONT},
+                },
+                height=260,
+                margin={"t": 36, "b": 24, "l": 24, "r": 24},
+                paper_bgcolor=PLOTLY_PAPER,
+                plot_bgcolor=PLOTLY_PAPER,
+                font={"color": PLOTLY_FONT, "family": "IBM Plex Sans", "size": 12},
+                xaxis={"gridcolor": PLOTLY_GRID},
+                yaxis={"gridcolor": PLOTLY_GRID, "title": "Segundos"},
+                showlegend=False,
+            )
+            st.plotly_chart(fig_perf, use_container_width=True)
+
+            with st.expander("📋 Ver registro tabular de llamadas recientes", expanded=False):
+                st.dataframe(
+                    [
+                        {
+                            "ID": h["id"],
+                            "Hora": h["timestamp"].replace("T", " ")[:19],
+                            "Modo": h["mode"],
+                            "Total (s)": round(h["total_seconds"], 2),
+                            "Carga (s)": round(h["load_seconds"], 2),
+                            "Eval Prompt (s)": round(h["prompt_eval_seconds"], 2),
+                            "Gen (s)": round(h["gen_seconds"], 2),
+                            "Tokens Gen": h["gen_tokens"],
+                            "Tok/s": round(h["tokens_per_second"], 1),
+                        }
+                        for h in history_p
+                    ],
+                    use_container_width=True,
+                )
