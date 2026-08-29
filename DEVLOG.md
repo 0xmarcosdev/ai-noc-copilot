@@ -417,3 +417,32 @@ curl -s -o NUL -w "%{http_code}" http://localhost:8000/events/45
    - Gráfico de dispersión/línea temporal interactivo (Plotly) que refleja el tiempo de generación por llamada y tabla expandible con el historial reciente.
 3. **Validación**:
    - `pytest tests -v` pasando en verde (37/37 tests).
+
+## [28 Ago 2026] Sesión de Debugging: Robustez de Escenarios Sintéticos y Exclusión Mutua en API
+**Asistente**: Gemini Notebook (Copiloto de IA)
+
+### Diagnóstico y Problemas Encontrados
+1. **Conflicto en escenario 'beacon'**: El endpoint `/events/correlate` agrupaba eventos del escenario de beaconing (que usan acción `pass` y dirección `out`) y los marcaba incorrectamente como `fuerza_bruta` debido a la baja variación de puertos destino hacia el C2 [3]. Esto marcaba los logs como `analyzed=True`, impidiendo que `/events/detect-beaconing` los procesara [3].
+2. **Error de desempaquetado en beaconing**: Un intento previo de solucionar la concurrencia alteró el agrupamiento de beaconing a una clave de tipo string, lo que provocaba un error catastrófico de tipo `ValueError` al desestructurar la tupla original `(srcip, dstip, dstport)`.
+3. **Inestabilidad del escenario 'portscan'**: El script `generate_fake_logs.py` elegía puertos destino con reposición (`random.choice`) de un pool muy pequeño de 9 puertos [4]. Con un conteo por defecto de 5 logs, era común tener duplicados, lo que bajaba el ratio de variación al rango indeterminado (`0.3 - 0.7`) y arruinaba la consistencia de la demo.
+
+### Cambios Realizados
+
+#### Backend (`backend/app/main.py`)
+- **Filtrado estricto**: Se modificó `correlate_events()` para extraer los metadatos de conexión con `extract_connection_summary()` y procesar **únicamente** eventos que posean la acción `"block"`.
+- **Restauración de Beaconing**: Se revirtió la firma de agrupación en `/events/detect-beaconing` al diccionario de tuplas `(src, dst, dport)` para mantener el análisis de intervalos temporal intacto y evitar errores en tiempo de ejecución.
+
+#### Generador sintético (`scripts/generate_fake_logs.py`)
+- **Pool de puertos ampliado**: Se declaró una tupla global `COMMON_PORTS` con 40 puertos representativos de infraestructura de TI.
+- **Muestreo sin reposición**: En el escenario de `portscan`, se implementó la generación de una lista de puertos destino únicos mediante `random.sample()`, garantizando que el ratio de variación sea consistentemente `1.0` en lotes cortos de prueba (como `--count 5`), haciendo la demo 100% predecible.
+- **Compatibilidad**: Se adaptaron los constructores para que utilicen tuplas de forma nativa y evitar interferencias de renderizado markdown en la plataforma.
+
+#### Pruebas de integración (`backend/tests/test_api.py`)
+- Se implementó `test_correlate_ignores_pass_action_events` de forma aislada e independiente para confirmar que los paquetes `pass`/`out` jamás sean tomados por la lógica de correlación.
+
+#### Especificación técnica (`docs/SPEC.md`)
+- Se actualizó la sección §7 para reflejar explícitamente que la correlación de eventos determinista solo opera sobre paquetes bloqueados.
+
+### Resultados de la Sesión
+- **100% de los tests en verde** ejecutando `pytest tests -v` en el entorno virtual.
+- Los escenarios `beacon` y `portscan` se comportan de forma predecible y excluyente sin pisarse entre sí.

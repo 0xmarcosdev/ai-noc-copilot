@@ -149,9 +149,7 @@ caliente o frío, ver `docs/llm-latency-diagnosis.md`).
 
 ## 7. Correlación de eventos
 
-`POST /events/correlate` agrupa eventos no analizados por IP atacante
-(dentro de una ventana de tiempo configurable). Para cada grupo que
-supera el umbral:
+`POST /events/correlate` agrupa eventos no analizados por IP atacante (dentro de una ventana de tiempo configurable). Importante: Este endpoint solo considera eventos cuya acción extraída sea de bloqueo (action == "block"), asegurando que conexiones legítimas o flujos periódicos permitidos (como el tráfico de beaconing) no interfieran ni sean clasificados erróneamente en este análisis.
 
 1. **Clasificación determinista de puertos** (`classify_port_pattern` en
    `main.py`): calcula la proporción de puertos destino *distintos* sobre

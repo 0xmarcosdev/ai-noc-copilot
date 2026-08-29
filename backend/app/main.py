@@ -142,11 +142,11 @@ def performance_stats():
     with Session(engine) as session:
         timings = session.exec(select(LLMTiming).order_by(LLMTiming.timestamp.desc()).limit(100)).all()
         total_calls = session.exec(select(func.count(LLMTiming.id))).one()
-        
+
         avg_total = session.exec(select(func.avg(LLMTiming.total_seconds))).one() or 0.0
         avg_gen = session.exec(select(func.avg(LLMTiming.gen_seconds))).one() or 0.0
         avg_tps = session.exec(select(func.avg(LLMTiming.tokens_per_second))).one() or 0.0
-        
+
         # Última llamada registrada
         latest = timings[0] if timings else None
 
@@ -191,7 +191,7 @@ def performance_stats():
                 "speed": "~5.2 tok/s (~19s por respuesta)",
                 "quality": "Alta (Razonamiento completo)",
                 "recommended": False,
-                "description": "Excede ligeramente los 2GB de la MX150. Se ejecuta parcialmente en CPU (74%), generando el cuello de botella físico."
+                "description": "Excede ligeramente los 2GB de la MX150. Se ejecuta parcialmente en CPU (74%), generando el cuello de botella físico.",
             },
             {
                 "option": "Opción A: Qwen 2.5 1.5B (Q4_K_M)",
@@ -199,7 +199,7 @@ def performance_stats():
                 "speed": "~30-40 tok/s (~3-5s por respuesta)",
                 "quality": "Muy buena para clasificación de logs",
                 "recommended": True,
-                "description": "Entra 100% en la VRAM de la MX150. Acelera la inferencia x4 sin perder precisión clave en seguridad perimetral."
+                "description": "Entra 100% en la VRAM de la MX150. Acelera la inferencia x4 sin perder precisión clave en seguridad perimetral.",
             },
             {
                 "option": "Opción B: Cuantización Q3_K_M (3.4B)",
@@ -207,7 +207,7 @@ def performance_stats():
                 "speed": "~15s por respuesta",
                 "quality": "Media-Alta",
                 "recommended": False,
-                "description": "Comprime el modelo 3B para que quepa en 2GB VRAM, pero introduce ligera pérdida de razonamiento."
+                "description": "Comprime el modelo 3B para que quepa en 2GB VRAM, pero introduce ligera pérdida de razonamiento.",
             },
             {
                 "option": "Opción C: CPU Pura Q8_0 (3.4B)",
@@ -215,9 +215,9 @@ def performance_stats():
                 "speed": "~5-7 tok/s (~18s por respuesta)",
                 "quality": "Alta",
                 "recommended": False,
-                "description": "Evita la latencia de transferencia CPU<->GPU ejecutando todo en CPU. Mantiene velocidad similar pero libera VRAM."
-            }
-        ]
+                "description": "Evita la latencia de transferencia CPU<->GPU ejecutando todo en CPU. Mantiene velocidad similar pero libera VRAM.",
+            },
+        ],
     }
 
 
@@ -501,7 +501,13 @@ async def correlate_events(window_minutes: int = 10, threshold: int = CORRELATIO
         for event in events:
             attacker_ip = extract_attacker_ip(event.raw_message)
             if attacker_ip:
-                groups[attacker_ip].append(event)
+                # 1. Extraemos los campos de la conexión utilizando la función existente
+                conn = extract_connection_summary(event.raw_message)
+
+                # 2. Filtramos estrictamente: solo agrupamos si se pudo extraer la conexión
+                #    y su acción es explícitamente "block"
+                if conn and conn.get("action") == "block":
+                    groups[attacker_ip].append(event)
 
         # correlation_group es un contador global creciente: nunca se
         # reutiliza un id, aunque haya huecos, para que el historial

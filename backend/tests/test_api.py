@@ -885,3 +885,58 @@ def test_chat_propaga_error_502_si_ollama_falla(seed_event):
         # StreamingResponse no puede cambiar el status code, pero la
         # excepción se loguea y el cliente recibe el aborto de conexión
         assert resp.status_code in (500, 502)
+
+
+def test_get_event_by_id(seed_event):
+    client = TestClient(app)
+    resp = client.get(f"/events/{seed_event.id}")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["id"] == seed_event.id
+    assert data["source_ip"] == "192.168.1.1"
+    assert "raw_message" in data
+
+
+def test_get_event_missing_returns_404():
+    client = TestClient(app)
+    resp = client.get("/events/999999")
+    assert resp.status_code == 404
+
+
+def test_correlate_ignores_pass_action_events(monkeypatch):
+    """Eventos con acción 'pass' (como beaconing) no deben ser agrupados por /events/correlate."""
+    from app import main as main_module
+
+    # Mock robusto: solo levanta AssertionError si intentamos correlacionar nuestra IP de prueba
+    async def fake_explain_correlated_events(logs: str, count: int):
+        if "192.168.10.15" in logs:
+            raise AssertionError("No debería llamarse al LLM para eventos con IP 192.168.10.15 (acción pass)")
+        # Para otras IPs remanentes de otros tests, devolvemos un resultado simulado para no romper la suite
+        return {
+            "severity": "low",
+            "event_type": "remanente",
+            "explanation": "Evento remanente de otra prueba",
+            "recommended_action": "Ninguna",
+        }
+
+    monkeypatch.setattr(main_module, "explain_correlated_events", fake_explain_correlated_events)
+
+    with Session(engine) as session:
+        for i in range(6):
+            session.add(
+                NetworkEvent(
+                    source_ip="192.0.2.1",
+                    raw_message=_pass_out_message("192.168.10.15", "192.0.2.77", 443, i),
+                )
+            )
+        session.commit()
+
+    client = TestClient(app)
+    resp = client.post("/events/correlate", params={"window_minutes": 10, "threshold": 5})
+    assert resp.status_code == 200
+    data = resp.json()
+
+    # En lugar de evaluar data["groups_detected"] == 0 globalmente,
+    # validamos específicamente que nuestra IP de prueba "192.168.10.15" no haya sido agrupada.
+    mine = [g for g in data.get("groups", []) if g.get("attacker_ip") == "192.168.10.15"]
+    assert len(mine) == 0, f"Se agrupó erróneamente la IP de prueba: {mine}"
