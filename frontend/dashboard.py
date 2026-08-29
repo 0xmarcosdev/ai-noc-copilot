@@ -696,7 +696,7 @@ with st.expander("📥 Ingesta manual de logs", expanded=False):
             st.warning("Pegá logs o subí un archivo primero.")
     st.caption("Sanitizá IPs internas antes de pegar logs reales (SPEC §8).")
 
-tab_events, tab_chat, tab_corr, tab_perf = st.tabs(["📋 Eventos", "💬 Chat", "🔗 Correlación", "⚡ Rendimiento"])
+tab_events, tab_chat, tab_corr, tab_perf, tab_about = st.tabs(["📋 Eventos", "💬 Chat", "🔗 Correlación", "⚡ Rendimiento", "ℹ️ Acerca del proyecto"])
 
 # ── TAB EVENTOS ─────────────────────────────────────────────────────────────
 with tab_events:
@@ -1617,3 +1617,98 @@ with tab_perf:
                     ],
                     use_container_width=True,
                 )
+
+# ── TAB ACERCA DEL PROYECTO ───────────────────────────────────────────────────
+with tab_about:
+    st.markdown("### Acerca del proyecto")
+
+    # ── Sección: El problema ──
+    st.markdown("#### El problema")
+    st.markdown(
+        """
+Administrador de red de una empresa con arquitectura hub-and-spoke (sucursales con pfSense → sede central), red **air-gapped** (sin acceso a Internet). Revisar logs de firewall manualmente es lento y no escala. El LLM en la nube no es una opción (ni por política, ni por falta de Internet).
+        """
+    )
+
+    # ── Sección: Arquitectura ──
+    st.markdown("#### Arquitectura")
+    arch_img_path = "docs/diagrams/arquitectura.png"
+    try:
+        st.image(arch_img_path, caption="Arquitectura del sistema")
+    except Exception:
+        st.info(f"📐 Diagrama de arquitectura pendiente — se generará en Fase 3 del plan. Ruta esperada: `{arch_img_path}`")
+
+    # ── Sección: Decisiones de diseño clave ──
+    st.markdown("#### Decisiones de diseño clave")
+
+    decisions = [
+        {
+            "title": "Ollama nativo, no en Docker",
+            "desc": "Ollama corre en el host (no en contenedor) para evitar duplicar el modelo (~2.1 GB) y simplificar networking. Docker solo para backend+frontend en el entregable del curso (SPEC §3).",
+        },
+        {
+            "title": "Detección determinista, LLM solo explica",
+            "desc": "Beaconing (CV de intervalos) y DGA (entropía Shannon) se detectan en Python puro. El LLM recibe el hallazgo ya clasificado y redacta la explicación — nunca decide si algo es malicioso (AGENTS §11, SPEC §11).",
+        },
+        {
+            "title": "IP atacante se extrae del raw_message",
+            "desc": "`NetworkEvent.source_ip` es la IP del paquete UDP (el propio pfSense). La IP real del atacante se extrae con regex del `raw_message` (`extract_attacker_ip` en `main.py:46`). No cambiar a `source_ip` (AGENTS §11).",
+        },
+        {
+            "title": "Contrato LLM inmutable (4 claves JSON)",
+            "desc": "Salida estricta: `severity`, `event_type`, `explanation`, `recommended_action`. Prompt en `backend/app/prompts/threat_explainer.txt`, `format=json`, `temperature=0.1`. Cambiarlo rompe `main.py` (SPEC §6, §11).",
+        },
+    ]
+
+    for d in decisions:
+        with st.expander(d["title"], expanded=False):
+            st.markdown(d["desc"])
+
+    # ── Sección: Stack técnico ──
+    st.markdown("#### Stack técnico")
+    st.markdown(
+        """
+<div style="display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px;">
+  <span style="background: var(--ainoc-accent); color: #0B1220; padding: 4px 12px; border-radius: 20px; font-size: 0.7rem; font-weight: 700; font-family: 'JetBrains Mono', monospace;">FastAPI</span>
+  <span style="background: var(--ainoc-success); color: #0B1220; padding: 4px 12px; border-radius: 20px; font-size: 0.7rem; font-weight: 700; font-family: 'JetBrains Mono', monospace;">SQLModel</span>
+  <span style="background: var(--ainoc-warning); color: #0B1220; padding: 4px 12px; border-radius: 20px; font-size: 0.7rem; font-weight: 700; font-family: 'JetBrains Mono', monospace;">SQLite</span>
+  <span style="background: var(--ainoc-accent-dim); color: #FFFFFF; padding: 4px 12px; border-radius: 20px; font-size: 0.7rem; font-weight: 700; font-family: 'JetBrains Mono', monospace;">Streamlit</span>
+  <span style="background: #8B5CF6; color: #FFFFFF; padding: 4px 12px; border-radius: 20px; font-size: 0.7rem; font-weight: 700; font-family: 'JetBrains Mono', monospace;">Ollama + Qwen 3B</span>
+  <span style="background: var(--ainoc-danger); color: #FFFFFF; padding: 4px 12px; border-radius: 20px; font-size: 0.7rem; font-weight: 700; font-family: 'JetBrains Mono', monospace;">Plotly</span>
+</div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    # ── Sección: Roadmap ──
+    st.markdown("#### Roadmap")
+    phases = [
+        {"name": "Fase 0 — Diseño y alcance", "status": "done", "progress": 100},
+        {"name": "Fase 1 — Ingesta y pipeline base", "status": "done", "progress": 100},
+        {"name": "Fase 2 — LLM local", "status": "done", "progress": 100},
+        {"name": "Fase 3 — Datos sintéticos y verificación", "status": "done", "progress": 100},
+        {"name": "Fase 4 — Correlación de eventos", "status": "done", "progress": 100},
+        {"name": "Fase 5.5 — Detección extendida", "status": "done", "progress": 100},
+        {"name": "Fase 5.6 — Ingesta manual de logs", "status": "in_progress", "progress": 80},
+        {"name": "Fase 5.7 — Búsqueda, filtros y paginación", "status": "done", "progress": 100},
+        {"name": "Fase 5.8 — Persistencia y clasificación de correlación", "status": "done", "progress": 100},
+        {"name": "Fase 5.9 — Estadísticas y gráficos", "status": "done", "progress": 100},
+        {"name": "Fase 5.10 — Chat interactivo y Rendimiento", "status": "done", "progress": 100},
+        {"name": "Fase 6 — Documentación y entrega", "status": "pending", "progress": 30},
+    ]
+
+    for p in phases:
+        col1, col2 = st.columns([3.5, 1.5])
+        with col1:
+            st.markdown(f"**{p['name']}**")
+        with col2:
+            if p["status"] == "done":
+                st.markdown('<span class="ainoc-badge-low">✓ Completada</span>', unsafe_allow_html=True)
+            elif p["status"] == "in_progress":
+                st.markdown('<span class="ainoc-badge-medium">⟳ En progreso</span>', unsafe_allow_html=True)
+            else:
+                st.markdown('<span style="color: var(--ainoc-muted); font-size: 0.7rem; font-family: JetBrains Mono, monospace;">⬜ Pendiente</span>', unsafe_allow_html=True)
+        st.progress(p["progress"] / 100)
+
+    st.markdown("")
+    st.link_button("🔗 Ver en GitHub", "https://github.com/0xmarcosdev/ai-noc-copilot", use_container_width=True)

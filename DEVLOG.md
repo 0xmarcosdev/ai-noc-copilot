@@ -446,3 +446,4 @@ curl -s -o NUL -w "%{http_code}" http://localhost:8000/events/45
 ### Resultados de la Sesión
 - **100% de los tests en verde** ejecutando `pytest tests -v` en el entorno virtual.
 - Los escenarios `beacon` y `portscan` se comportan de forma predecible y excluyente sin pisarse entre sí.
+
