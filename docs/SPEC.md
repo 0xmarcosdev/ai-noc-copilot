@@ -29,14 +29,16 @@ IA, documentación (este archivo + README + Swagger), testing, demo.
 ## 2. Alcance
 
 ### Dentro del MVP
+
 - Ingesta de syslog UDP (formato filterlog de pfSense, verificado).
 - Almacenamiento en SQLite.
 - Análisis de eventos individuales vía LLM local (severidad, tipo, explicación).
 - Generación de datos sintéticos para pruebas (no depende de pfSense disponible).
-- Dashboard web (Streamlit): lista de eventos + botón "Explicar con IA".
-- Correlación de eventos relacionados (ver §7).
+- Dashboard web (Streamlit): Eventos (filtros/paginación), Chat, Correlación (histórico tabular + detalles), Rendimiento, Acerca.
+- Correlación: detección determinista + LLM en /events/correlate; la UI puede re-explicar vía evento ancla y caché de sesión hasta que el histórico exponga explanation.(ver §7).
 
 ### Fuera de alcance (Roadmap, no se construye ahora)
+
 - Multi-sucursal real / múltiples fuentes de syslog simultáneas.
 - RAG sobre documentación interna (runbooks, políticas).
 - ML de anomalías (Isolation Forest) sobre métricas de tráfico.
@@ -103,6 +105,7 @@ post-MVP si se necesita filtrar/agregar por esos campos sin depender del LLM.
 | GET | `/events/correlation-history?limit=` | historial de grupos de correlación: retorna grupos agrupados por `correlation_group` con metadatos (IPs, patrón, severidad, ventana temporal, IDs) |
 | POST | `/events/{event_id}/chat` | chat interactivo sobre un evento: recibe `{message, history}`, devuelve `StreamingResponse` con la respuesta del LLM (streaming puro) |
 | GET | `/summary?hours=` | resumen enriquecido: distribución por severidad, tipos dominantes, eventos correlacionados vs individuales, series temporales por hora, distribución por tipo de evento |
+| GET | `/performance/stats` | Hardware + latencias (pestaña Rendimiento) |
 
 Swagger autogenerado por FastAPI en `/docs` — es la documentación de API
 formal exigida por el curso, no se mantiene a mano.
@@ -192,6 +195,8 @@ correlation_group INTEGER`). No es un problema en desarrollo (datos
 sintéticos, se regeneran fácil) pero sí sería un problema real con datos
 de producción — candidato a arreglar antes de la Fase 6 si hay tiempo.
 
+La UI del histórico muestra estado de explicación con caché de sesión del dashboard si el payload de correlation-history no incluye texto del LLM. Re-explicar desde la UI usa el evento ancla del grupo (/events/{id}/analyze); no sustituye el prompt de lote de explain_correlated_events.
+
 ## 8. Decisiones de seguridad / datos
 
 - No hay pfSense de laboratorio disponible; los pfSense reales están en
@@ -256,7 +261,4 @@ no desde ningún CDN externo.
   sección correspondiente.
 
 ---
-*Última actualización: 25 ago 2026 — Fase 5.10 backend completado
-(chat interactivo con streaming), 37/37 tests en verde. Pendiente: UI
-del chat (Parte B, decisiones del humano), migración de esquema real
-(ver limitación documentada en §7).*
+*Última actualización: 29 ago 2026 — UI correlación tabular, navegación por radio, pestañas rendimiento/acerca.*

@@ -7,6 +7,7 @@ import re
 from datetime import datetime, time
 
 import httpx
+import pandas as pd
 import streamlit as st
 
 st.set_page_config(
@@ -28,12 +29,86 @@ SORT_LABELS = list(SORT_FIELDS.keys())
 
 SEVERITY_COLORS = {"high": "🔴", "medium": "🟠", "low": "🟢"}
 SEVERITY_HEX = {"high": "#E11D48", "medium": "#D97706", "low": "#059669"}
-PATTERN_ICONS = {"fuerza_bruta": "🎯", "escaneo_puertos": "📡"}
+PATTERN_ICONS = {
+    "fuerza_bruta": "🎯",
+    "escaneo_puertos": "📡",
+    "beaconing": "📡",
+    "dns_dga": "🧬",
+}
 
 
 def _parse_id(texto: str) -> int | None:
     texto = (texto or "").strip()
     return int(texto) if texto.isdigit() else None
+
+
+def _fmt_ports(ports, max_show: int = 4) -> str:
+    if not ports:
+        return "—"
+    try:
+        seq = sorted({int(p) for p in ports})
+    except (TypeError, ValueError):
+        seq = list(ports)
+    if len(seq) <= max_show:
+        return ", ".join(str(p) for p in seq)
+    return ", ".join(str(p) for p in seq[:max_show]) + f" +{len(seq) - max_show}"
+
+
+def _fmt_ts_short(value) -> str:
+    if not value:
+        return "—"
+    try:
+        dt = datetime.fromisoformat(str(value).replace("Z", "+00:00")[:19])
+        return dt.strftime("%d/%m %H:%M")
+    except (ValueError, TypeError):
+        return str(value).replace("T", " ")[:16]
+
+
+def _store_group_explanation(gid, event_ids, explanation: str, action: str = "", severity: str | None = None):
+    if "corr_expl" not in st.session_state:
+        st.session_state.corr_expl = {}
+    if "corr_expl_by_ids" not in st.session_state:
+        st.session_state.corr_expl_by_ids = {}
+    payload = {
+        "explanation": (explanation or "").strip(),
+        "recommended_action": (action or "").strip(),
+        "severity": severity,
+    }
+    if gid is not None:
+        st.session_state.corr_expl[gid] = payload
+    if event_ids:
+        ids_key = ",".join(map(str, sorted(event_ids)))
+        st.session_state.corr_expl_by_ids[ids_key] = payload
+
+
+def _group_explanation(g: dict) -> str | None:
+    if "corr_expl" not in st.session_state:
+        st.session_state.corr_expl = {}
+    if "corr_expl_by_ids" not in st.session_state:
+        st.session_state.corr_expl_by_ids = {}
+
+    gid = g.get("correlation_group")
+    if gid is not None and gid in st.session_state.corr_expl:
+        val = st.session_state.corr_expl[gid]
+        if isinstance(val, dict):
+            t = (val.get("explanation") or "").strip()
+            if t:
+                return t
+        elif val and str(val).strip():
+            return str(val).strip()
+
+    ids = g.get("event_ids") or []
+    if ids:
+        ids_key = ",".join(map(str, sorted(ids)))
+        cached = st.session_state.corr_expl_by_ids.get(ids_key)
+        if cached and cached.get("explanation"):
+            return cached["explanation"]
+
+    for key in ("explanation", "ai_explanation"):
+        val = g.get(key)
+        if val and str(val).strip():
+            return str(val).strip()
+    return None
 
 
 def _severity_title_badge(severity: str | None, analyzed: bool = True) -> str:
@@ -127,6 +202,28 @@ def _render_chat_html(messages: list[dict]) -> str:
 # ── Tema (no tocar chat_messages al cambiar) ────────────────────────────────
 if "theme" not in st.session_state:
     st.session_state.theme = "dark"
+
+if "notification_log" not in st.session_state:
+    st.session_state.notification_log = []  # lista de dicts
+
+
+def _push_notification(n_type: str, message: str) -> None:
+    """Registra y muestra una notificación (sin emojis duplicados en el texto)."""
+    message = (message or "").strip()
+    # Quitar emojis de estado si vinieron en el texto
+    for prefix in ("✅ ", "❌ ", "ℹ️ ", "📊 ", "📉 "):
+        if message.startswith(prefix):
+            message = message[len(prefix) :].strip()
+    entry = {
+        "ts": datetime.utcnow().strftime("%H:%M:%S"),
+        "type": n_type,
+        "message": message,
+    }
+    st.session_state.notification_log.insert(0, entry)
+    st.session_state.notification_log = st.session_state.notification_log[:50]
+    st.session_state.notification = {"type": n_type, "message": message}
+
+
 if "chat_messages" not in st.session_state:
     st.session_state.chat_messages = []
 
@@ -190,8 +287,7 @@ PLOTLY_FONT = "#CBD5E1" if is_dark else "#1E293B"
 PLOTLY_GRID = "#334155" if is_dark else "#CBD5E1"
 PLOTLY_PAPER = "rgba(0,0,0,0)"
 
-BRANDING_CSS = f"""
-<style>
+BRANDING_CSS = f"""\n<style>
     @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;600;700;800&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap');
 
     :root {{
@@ -346,9 +442,21 @@ BRANDING_CSS = f"""
         color: var(--ainoc-text) !important;
         border: 1px solid var(--ainoc-border) !important;
         border-radius: 7px !important;
-        font-family: 'JetBrains Mono', monospace !important;
-        font-weight: 600 !important;
-        font-size: 0.74rem !important;
+        font-family: "JetBrains Mono", monospace !important;
+        font-weight: 700 !important;
+        font-size: 1rem !important;
+        min-height: 2.15rem !important;
+        box-shadow: 0 1px 3px var(--ainoc-shadow) !important;
+    }}
+    div[data-testid="stButton"] > button:not([kind="primary"]):hover {{
+        border-color: var(--ainoc-accent) !important;
+        color: var(--ainoc-accent) !important;
+    }}
+    /* Header: refresh + tema siempre legibles */
+    div[data-testid="stButton"] > button[kind="secondary"] p,
+    div[data-testid="stButton"] > button:not([kind="primary"]) p,
+    div[data-testid="stButton"] > button:not([kind="primary"]) span {{
+        color: inherit !important;
     }}
     div[data-testid="stDownloadButton"] > button {{
         background-color: var(--ainoc-accent) !important;
@@ -578,6 +686,59 @@ BRANDING_CSS = f"""
         color: var(--ainoc-text) !important;
         border: 1px solid var(--ainoc-border) !important;
     }}
+
+    /* Botones compactos del header (tema + refresh) */
+    div[data-testid="column"]:has(button[kind="secondary"]) button,
+    div[data-testid="stButton"] > button[kind="secondary"] {{
+        min-height: 2.15rem !important;
+        box-shadow: 0 1px 3px var(--ainoc-shadow), inset 0 1px 0 rgba(255,255,255,0.06) !important;
+    }}
+
+    /* ── Dataframe: tema + selección ── */
+    [data-testid="stDataFrame"],
+    [data-testid="stDataFrameResizable"] {{
+        background-color: var(--ainoc-panel) !important;
+        color: var(--ainoc-text) !important;
+        border: 1px solid var(--ainoc-border) !important;
+        border-radius: 8px !important;
+    }}
+    [data-testid="stDataFrame"] [role="grid"],
+    [data-testid="stDataFrame"] [role="row"],
+    [data-testid="stDataFrame"] [role="columnheader"],
+    [data-testid="stDataFrame"] [role="gridcell"] {{
+        background-color: var(--ainoc-panel) !important;
+        color: var(--ainoc-text) !important;
+        border-color: var(--ainoc-border) !important;
+    }}
+    [data-testid="stDataFrame"] [role="columnheader"] {{
+        background-color: var(--ainoc-elevated) !important;
+        color: var(--ainoc-muted) !important;
+        font-family: "JetBrains Mono", monospace !important;
+    }}
+
+    /* Fila / celda seleccionada */
+    [data-testid="stDataFrame"] [aria-selected="true"],
+    [data-testid="stDataFrame"] [role="gridcell"][aria-selected="true"],
+    [data-testid="stDataFrame"] div[role="row"][aria-selected="true"],
+    [data-testid="stDataFrameResizable"] [aria-selected="true"] {{
+        background-color: rgba(8, 145, 178, 0.20) !important;
+        box-shadow: inset 3px 0 0 #0891B2 !important;
+        color: var(--ainoc-text) !important;
+    }}
+
+    /* Checkbox / marca de selección del grid */
+    [data-testid="stDataFrame"] input[type="checkbox"]:checked,
+    [data-testid="stDataFrame"] [data-checked="true"],
+    [data-testid="stDataFrame"] svg[fill] {{
+        accent-color: #0891B2 !important;
+        fill: #0891B2 !important;
+        color: #0891B2 !important;
+    }}
+    /* Asegurar que el focus no fuerce rojo */
+    div[data-testid="stDataFrame"] div[role="gridcell"]:focus-within {{
+        outline: none !important;
+        box-shadow: inset 0 0 0 1px var(--ainoc-accent) !important;
+    }}
 </style>
 """
 
@@ -610,7 +771,7 @@ AINOC_LOGO_SVG = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" 
 </svg>"""
 
 # Header
-hc1, hc2 = st.columns([5.5, 1.15])
+hc1, hc2 = st.columns([6.2, 1.5], gap="small")
 with hc1:
     st.markdown(
         f"""<div style="display:flex;align-items:center;gap:10px;">
@@ -623,11 +784,27 @@ with hc1:
         unsafe_allow_html=True,
     )
 with hc2:
-    theme_label = "☀️ Claro" if is_dark else "🌙 Oscuro"
-    if st.button(theme_label, key="theme_toggle", use_container_width=True):
-        # Solo cambia tema; chat_messages y demás session_state se preservan
-        st.session_state.theme = "light" if is_dark else "dark"
-        st.rerun()
+    b_ref, b_theme = st.columns(2, gap="small")
+    with b_ref:
+        refresh_label = "↻" if is_dark else "↻ Act"
+        if st.button(
+            refresh_label,
+            key="refresh_btn",
+            use_container_width=True,
+            help="Actualizar datos del dashboard",
+        ):
+            st.session_state.refrescar_total_anterior = st.session_state.get("total_cargado", 0)
+            st.rerun()
+    with b_theme:
+        theme_label = "☀️" if is_dark else "🌙"
+        if st.button(
+            theme_label,
+            key="theme_toggle",
+            use_container_width=True,
+            help="Cambiar tema claro / oscuro",
+        ):
+            st.session_state.theme = "light" if is_dark else "dark"
+            st.rerun()
 
 if "notification" in st.session_state:
     n = st.session_state.notification
@@ -639,12 +816,20 @@ if "notification" in st.session_state:
         st.info(n["message"], icon="ℹ️")
     del st.session_state.notification
 
+with st.expander("Historial de notificaciones", expanded=False):
+    log = st.session_state.get("notification_log") or []
+    if not log:
+        st.caption("Sin operaciones registradas en esta sesión.")
+    else:
+        for item in log:
+            icon = {"success": "✅", "error": "❌", "info": "ℹ️"}.get(item["type"], "•")
+            st.markdown(f"`{item['ts']}` {icon} {item['message']}")
+        if st.button("Limpiar historial", key="clear_notif_log"):
+            st.session_state.notification_log = []
+            st.rerun()
+
 if "refrescar_total_anterior" not in st.session_state:
     st.session_state.refrescar_total_anterior = None
-
-if st.button("↻ Actualizar", key="refresh_btn"):
-    st.session_state.refrescar_total_anterior = st.session_state.get("total_cargado", 0)
-    st.rerun()
 
 if st.session_state.get("refrescar_total_anterior") is not None:
     ant = st.session_state.refrescar_total_anterior
@@ -652,7 +837,7 @@ if st.session_state.get("refrescar_total_anterior") is not None:
     if nuevo != ant:
         d = nuevo - ant
         msg = f"📊 {d} eventos nuevos" if d > 0 else f"📉 {abs(d)} eventos eliminados"
-        st.session_state.notification = {"type": "info", "message": msg}
+        _push_notification("info", msg)
         st.rerun()
     st.session_state.refrescar_total_anterior = None
 
@@ -684,22 +869,34 @@ with st.expander("📥 Ingesta manual de logs", expanded=False):
                 )
                 resp.raise_for_status()
                 data = resp.json()
-                st.session_state.notification = {
-                    "type": "success",
-                    "message": f"✅ {data['ingested']} eventos ingeridos correctamente",
-                }
+                _push_notification("success", f"{data['ingested']} eventos ingeridos correctamente")
                 st.rerun()
             except httpx.HTTPError as exc:
-                st.session_state.notification = {"type": "error", "message": f"❌ Error: {exc}"}
+                _push_notification("error", f"Error: {exc}")
                 st.rerun()
         else:
             st.warning("Pegá logs o subí un archivo primero.")
     st.caption("Sanitizá IPs internas antes de pegar logs reales (SPEC §8).")
 
-tab_events, tab_chat, tab_corr, tab_perf, tab_about = st.tabs(["📋 Eventos", "💬 Chat", "🔗 Correlación", "⚡ Rendimiento", "ℹ️ Acerca del proyecto"])
+_TAB_OPTIONS = [
+    "📋 Eventos",
+    "💬 Chat",
+    "🔗 Correlación",
+    "⚡ Rendimiento",
+    "ℹ️ Acerca del proyecto",
+]
+if "main_tab" not in st.session_state:
+    st.session_state.main_tab = _TAB_OPTIONS[0]
+_tab = st.radio(
+    "Sección",
+    _TAB_OPTIONS,
+    horizontal=True,
+    key="main_tab",
+    label_visibility="collapsed",
+)
 
 # ── TAB EVENTOS ─────────────────────────────────────────────────────────────
-with tab_events:
+if _tab == "📋 Eventos":
     main_col, side_col = st.columns([2.2, 1], gap="medium")
 
     with side_col:
@@ -1138,7 +1335,7 @@ with tab_events:
             st.rerun()
 
 # ── TAB CHAT ────────────────────────────────────────────────────────────────
-with tab_chat:
+elif _tab == "💬 Chat":
     st.markdown("### Chat con el Copiloto")
     st.caption(
         "Indicá si consultás un evento o un grupo, escribí el número de ID y preguntá. "
@@ -1430,81 +1627,319 @@ with tab_chat:
         st.caption(f"⏱️ Última respuesta: {st.session_state['chat_last_elapsed']:.1f}s")
 
 # ── TAB CORRELACIÓN ─────────────────────────────────────────────────────────
-with tab_corr:
+elif _tab == "🔗 Correlación":
     st.markdown("### Correlación de eventos")
-    if st.button("Correlacionar eventos sin analizar", type="primary", key="btn_correlate"):
-        with st.spinner("Buscando patrones..."):
-            try:
-                resp = httpx.post(
-                    f"{BACKEND_URL}/events/correlate",
-                    params={"window_minutes": 10, "threshold": 5},
-                    timeout=90,
-                    trust_env=False,
-                )
-                resp.raise_for_status()
-                correlation = resp.json()
-            except httpx.HTTPError as exc:
-                st.error(f"Error: {exc}")
-                correlation = None
-        if correlation:
-            if correlation["groups_detected"] == 0:
+
+    if "corr_expl" not in st.session_state:
+        st.session_state.corr_expl = {}
+    if "corr_expl_by_ids" not in st.session_state:
+        st.session_state.corr_expl_by_ids = {}
+    if "corr_selected_gid" not in st.session_state:
+        st.session_state.corr_selected_gid = None
+    if "corr_page" not in st.session_state:
+        st.session_state.corr_page = 0
+    if "corr_correlating" not in st.session_state:
+        st.session_state.corr_correlating = False
+
+    # Botón de correlacionar con estado busy
+    if st.session_state.corr_correlating:
+        st.button("⏳ Buscando patrones…", disabled=True, key="btn_correlate_busy", use_container_width=True)
+    else:
+        if st.button(
+            "Correlacionar eventos sin analizar",
+            type="primary",
+            key="btn_correlate",
+            use_container_width=True,
+        ):
+            st.session_state.corr_correlating = True
+            st.rerun()
+
+    # Procesamiento de correlación (fuera del árbol de widgets)
+    if st.session_state.corr_correlating:
+        try:
+            resp = httpx.post(
+                f"{BACKEND_URL}/events/correlate",
+                params={"window_minutes": 10, "threshold": 5},
+                timeout=90,
+                trust_env=False,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            st.session_state["corr_result_pending"] = data
+            n_groups = data.get("groups_detected", 0)
+            # Guardar explicaciones iniciales de los grupos nuevos
+            for group in data.get("groups") or []:
+                gid = group.get("correlation_group")
+                if gid and group.get("explanation"):
+                    _store_group_explanation(
+                        gid,
+                        group.get("event_ids") or [],
+                        group.get("explanation", ""),
+                        group.get("recommended_action", ""),
+                        group.get("severity"),
+                    )
+            # Notificación según resultado
+            if n_groups == 0:
+                _push_notification("info", "No se detectaron patrones por encima del umbral.")
+            else:
+                _push_notification("success", f"{n_groups} patrón(es) detectado(s).")
+            st.session_state.corr_correlating = False
+            st.rerun()
+        except httpx.HTTPError as exc:
+            st.session_state.corr_correlating = False
+            _push_notification("error", f"Error al correlacionar: {exc}")
+            st.rerun()
+
+    # Notificación dismissible del último correlate
+    if st.session_state.get("corr_result_pending"):
+        pending = st.session_state["corr_result_pending"]
+        n_groups = pending.get("groups_detected", 0)
+        with st.container(border=True):
+            if n_groups == 0:
                 st.info("No se detectaron patrones por encima del umbral.")
             else:
-                st.success(f"{correlation['groups_detected']} patrón(es) detectado(s)")
-                for group in correlation["groups"]:
-                    icon = "🚨" if group["severity"] == "high" else "⚠️"
-                    with st.expander(
-                        f"{icon} {group['attacker_ip']} — {group['event_type']} ({group['event_count']} evt.)"
-                    ):
-                        st.markdown(f"**Severidad:** `{group['severity']}`")
-                        st.markdown(f"**Explicación:** {group['explanation']}")
-                        st.markdown(f"**Acción:** {group['recommended_action']}")
-                        with st.popover("IDs"):
-                            st.caption(", ".join(map(str, group["event_ids"])))
+                st.success(f"{n_groups} patrón(es) detectado(s)")
+                for group in pending.get("groups") or []:
+                    sev = group.get("severity") or "low"
+                    icon = "🚨" if sev == "high" else "⚠️"
+                    ip = group.get("attacker_ip") or ", ".join(group.get("attacker_ips") or []) or "?"
+                    etype = group.get("event_type") or group.get("pattern") or "indeterminado"
+                    st.markdown(
+                        f"{icon} **{ip}** — `{etype}` · **{group.get('event_count', 0)}** evt · sev `{sev}`"
+                    )
+                    if group.get("recommended_action"):
+                        st.markdown(f"**Acción recomendada:** {group['recommended_action']}")
+                    ids = group.get("event_ids") or []
+                    if ids:
+                        st.caption(f"IDs: {', '.join(map(str, ids))}")
+                    st.divider()
+            if st.button("Entendido", type="primary", key="corr_dismiss"):
+                _push_notification("info", "Correlación finalizada.")
+                del st.session_state["corr_result_pending"]
                 st.rerun()
 
     st.divider()
     st.markdown("### Histórico de correlación")
-    if st.button("Actualizar histórico", key="refresh_history"):
-        st.rerun()
+
     try:
         history = httpx.get(
             f"{BACKEND_URL}/events/correlation-history",
+            params={"limit": 50},
             timeout=10,
             trust_env=False,
         ).json()
     except httpx.HTTPError:
         history = {"total_groups": 0, "groups": []}
 
-    groups = history.get("groups") or []
-    if not groups:
-        st.caption("Sin grupos registrados.")
-    else:
-        st.caption(f"{history.get('total_groups', len(groups))} grupo(s)")
-        for g in groups:
-            pattern = g.get("pattern")
-            icon = PATTERN_ICONS.get(pattern, "❓")
-            ips = ", ".join(g.get("attacker_ips") or [])
-            sev = g.get("severity") or "low"
-            first = (g.get("first_seen") or "")[:16].replace("T", " ")
-            last = (g.get("last_seen") or "")[:16].replace("T", " ")
-            with st.expander(
-                f"{icon} #{g['correlation_group']} · {ips} ({g['event_count']} evt) · {pattern or 'indeterminado'}"
-            ):
-                st.markdown(
-                    f"**Severidad:** {_severity_content_badge(sev)} · "
-                    f"**Puertos únicos:** {len(g.get('unique_ports') or [])}",
-                    unsafe_allow_html=True,
-                )
-                st.markdown(f"**Ventana:** {first} → {last}")
-                with st.popover("IDs"):
-                    st.caption(", ".join(map(str, g.get("event_ids") or [])))
+    groups = list(history.get("groups") or [])
+    groups.sort(
+        key=lambda g: (g.get("last_seen") or "", g.get("correlation_group") or 0),
+        reverse=True,
+    )
 
+    # --- Fragmento de tabla y detalles aislados ---
+    @st.fragment
+    def _corr_table_fragment():
+        if not groups:
+            st.caption("Sin grupos registrados.")
+            return
+
+        st.caption(f"{history.get('total_groups', len(groups))} grupo(s) en histórico")
+
+        PAGE_SIZE = 10
+        total_pages = max(1, (len(groups) + PAGE_SIZE - 1) // PAGE_SIZE)
+        page = min(st.session_state.corr_page, total_pages - 1)
+        st.session_state.corr_page = page
+        start = page * PAGE_SIZE
+        page_groups = groups[start : start + PAGE_SIZE]
+
+        # Filas de la tabla
+        rows = []
+        for g in page_groups:
+            pattern = g.get("pattern") or "indeterminado"
+            icon = PATTERN_ICONS.get(pattern, "❓")
+            ips = ", ".join(g.get("attacker_ips") or []) or "—"
+            sev = (g.get("severity") or "low").lower()
+            expl = _group_explanation(g)
+            rows.append(
+                {
+                    "#": g.get("correlation_group"),
+                    "Severidad": f"{SEVERITY_COLORS.get(sev, '⚪')} {sev.upper()}",
+                    "Patrón": f"{icon} {pattern}",
+                    "IP(s)": ips,
+                    "Puertos": _fmt_ports(g.get("unique_ports") or []),
+                    "Eventos": g.get("event_count") or 0,
+                    "Desde": _fmt_ts_short(g.get("first_seen")),
+                    "Hasta": _fmt_ts_short(g.get("last_seen")),
+                    "Explicación": "✓ Explicado" if expl else "⏳ Pendiente",
+                }
+            )
+        df_corr = pd.DataFrame(rows)
+
+        selection = st.dataframe(
+            df_corr,
+            use_container_width=True,
+            hide_index=True,
+            on_select="rerun",
+            selection_mode="single-row",
+            key="corr_groups_table",
+            column_config={
+                "#": st.column_config.NumberColumn("#", width="small"),
+                "Severidad": st.column_config.TextColumn("Severidad", width="small"),
+                "Patrón": st.column_config.TextColumn("Patrón", width="medium"),
+                "IP(s)": st.column_config.TextColumn("IP(s)", width="medium"),
+                "Puertos": st.column_config.TextColumn("Puertos", width="medium"),
+                "Eventos": st.column_config.NumberColumn("Eventos", width="small"),
+                "Desde": st.column_config.TextColumn("Desde", width="small"),
+                "Hasta": st.column_config.TextColumn("Hasta", width="small"),
+                "Explicación": st.column_config.TextColumn("Explicación", width="small"),
+            },
+        )
+
+        # Paginación
+        prev_d = page == 0
+        next_d = (page + 1) * PAGE_SIZE >= len(groups)
+        pc1, pc2, pc3, pc4, pc5 = st.columns([1.2, 1.2, 2.5, 1.2, 1.2])
+        if pc1.button("« Primera", disabled=prev_d, use_container_width=True, key="corr_pg_f"):
+            st.session_state.corr_page = 0
+            st.rerun(scope="fragment")
+        if pc2.button("‹ Ant", disabled=prev_d, use_container_width=True, key="corr_pg_p"):
+            st.session_state.corr_page = max(0, page - 1)
+            st.rerun(scope="fragment")
+        desde = start + 1 if groups else 0
+        hasta = min(start + PAGE_SIZE, len(groups))
+        pc3.markdown(
+            f"<div style='text-align:center;padding-top:0.4rem'>"
+            f"{desde}–{hasta} / {len(groups)} · pág {page + 1}/{total_pages}</div>",
+            unsafe_allow_html=True,
+        )
+        if pc4.button("Sig ›", disabled=next_d, use_container_width=True, key="corr_pg_n"):
+            st.session_state.corr_page = page + 1
+            st.rerun(scope="fragment")
+        if pc5.button("Última »", disabled=next_d, use_container_width=True, key="corr_pg_l"):
+            st.session_state.corr_page = total_pages - 1
+            st.rerun(scope="fragment")
+
+        # --- Selección: grilla + gid guardado (no se pierde al explicar) ---
+        selected_row_indices = []
+        try:
+            selected_row_indices = list(selection.selection.rows) if selection else []
+        except Exception:
+            selected_row_indices = []
+
+        if selected_row_indices:
+            idx = selected_row_indices[0]
+            if 0 <= idx < len(page_groups):
+                st.session_state.corr_selected_gid = page_groups[idx].get("correlation_group")
+
+        gid_focus = st.session_state.get("corr_selected_gid")
+        g = None
+        if selected_row_indices and 0 <= selected_row_indices[0] < len(page_groups):
+            g = page_groups[selected_row_indices[0]]
+        elif gid_focus is not None:
+            g = next(
+                (x for x in groups if x.get("correlation_group") == gid_focus),
+                None,
+            )
+
+        if not g:
+            st.caption("Seleccioná una fila para ver explicación, acción e IDs del grupo.")
+            return
+
+        gid = g.get("correlation_group")
+        event_ids = g.get("event_ids") or []
+        expl = _group_explanation(g)
+
+        cached = None
+        if gid is not None:
+            cached = st.session_state.corr_expl.get(gid)
+        if not isinstance(cached, dict) and event_ids:
+            ids_key = ",".join(map(str, sorted(event_ids)))
+            cached = st.session_state.corr_expl_by_ids.get(ids_key)
+        if not isinstance(cached, dict):
+            cached = {}
+        action = cached.get("recommended_action") or g.get("recommended_action") or ""
+
+        st.markdown("---")
+        st.markdown(f"#### Detalles del grupo #{gid}")
+        if event_ids:
+            st.markdown(f"**IDs de eventos:** `{', '.join(map(str, event_ids))}`")
+        else:
+            st.caption("Sin event_ids en este grupo.")
+
+        if expl:
+            st.markdown("**Explicación**")
+            st.info(expl)
+            if action:
+                st.markdown(f"**Acción recomendada:** {action}")
+            st.caption(
+                "Nota: «Explicar» analiza un evento ancla del grupo; "
+                "el texto puede diferir del análisis de patrón del correlate."
+            )
+        else:
+            st.warning("Sin explicación aún. Usá el botón de abajo.")
+
+        busy = st.session_state.get("corr_explaining") == gid
+        if busy:
+            st.markdown("⏳ **Razonando…** (Consultando al modelo local, esto puede demorar unos segundos)")
+            target_ids = event_ids[:1] if event_ids else []
+            if not target_ids:
+                st.session_state.corr_explaining = None
+                st.error("No hay event_ids para analizar.")
+            else:
+                try:
+                    r = httpx.post(
+                        f"{BACKEND_URL}/events/{target_ids[0]}/analyze",
+                        timeout=60,
+                        trust_env=False,
+                    )
+                    if r.status_code == 200:
+                        data = r.json()
+                        text = data.get("ai_explanation") or data.get("explanation") or ""
+                        action_txt = ""
+                        if "Acción recomendada:" in text:
+                            parts = text.split("Acción recomendada:", 1)
+                            text = parts[0].strip()
+                            action_txt = parts[1].strip() if len(parts) > 1 else ""
+                        _store_group_explanation(
+                            gid,
+                            event_ids,
+                            text,
+                            action_txt,
+                            data.get("severity"),
+                        )
+                        st.session_state.corr_explaining = None
+                        st.session_state.corr_selected_gid = gid
+                        _push_notification("success", f"Grupo #{gid} explicado.")
+                        st.rerun()
+                    else:
+                        st.session_state.corr_explaining = None
+                        _push_notification(
+                            "error",
+                            f"Error {r.status_code} al explicar grupo #{gid}.",
+                        )
+                        st.rerun()
+                except httpx.HTTPError as exc:
+                    st.session_state.corr_explaining = None
+                    _push_notification("error", f"Error al explicar grupo #{gid}: {exc}")
+                    st.rerun()
+        else:
+            btn_label = "🤖 Explicar de nuevo" if expl else "🤖 Explicar con IA"
+            if expl:
+                st.caption("Regenerar consulta de nuevo al modelo y actualiza la explicación en esta sesión.")
+            if st.button(btn_label, type="primary", key=f"corr_explain_{gid}"):
+                st.session_state.corr_explaining = gid
+                st.session_state.corr_selected_gid = gid
+                st.rerun(scope="fragment")
+
+    _corr_table_fragment()
 
 # ── TAB RENDIMIENTO ──────────────────────────────────────────────────────────
-with tab_perf:
+elif _tab == "⚡ Rendimiento":
     st.markdown("### ⚡ Rendimiento del Motor LLM y Hardware")
-    st.caption("Análisis de latencia, uso de hardware (GPU/CPU) y comparativa de trade-offs para el proyecto final.")
+    st.caption(
+        "Análisis de latencia, uso de hardware (GPU/CPU) y comparativa de trade-offs para el proyecto final."
+    )
 
     perf_data = None
     try:
@@ -1526,8 +1961,16 @@ with tab_perf:
         col1, col2, col3, col4 = st.columns(4)
         col1.metric("Hardware", hw.get("gpu", "GPU"), hw.get("architecture", ""))
         col2.metric("Modelo Activo", hw.get("current_model", ""), hw.get("model_memory", ""))
-        col3.metric("Promedio Inferencia", f"{summary_p.get('avg_generation_seconds', 0)}s", f"{summary_p.get('avg_tokens_per_second', 0)} tok/s")
-        col4.metric("Llamadas Totales", summary_p.get("total_calls", 0), f"Promedio total: {summary_p.get('avg_total_seconds', 0)}s")
+        col3.metric(
+            "Promedio Inferencia",
+            f"{summary_p.get('avg_generation_seconds', 0)}s",
+            f"{summary_p.get('avg_tokens_per_second', 0)} tok/s",
+        )
+        col4.metric(
+            "Llamadas Totales",
+            summary_p.get("total_calls", 0),
+            f"Promedio total: {summary_p.get('avg_total_seconds', 0)}s",
+        )
 
         st.divider()
 
@@ -1538,8 +1981,8 @@ with tab_perf:
             st.markdown("#### 🔍 Diagnóstico Físico & Cuello de Botella")
             st.markdown(
                 f"""
-- **Distribución de Carga (Offload):** `{hw.get('offload_split', '74% CPU / 26% GPU')}`.
-- **Límite de VRAM:** La tarjeta gráfica **{hw.get('gpu')}** cuenta con **2 GB de VRAM**, mientras que el modelo actual pesa **~2.4 GB** en memoria.
+- **Distribución de Carga (Offload):** `{hw.get("offload_split", "74% CPU / 26% GPU")}`.
+- **Límite de VRAM:** La tarjeta gráfica **{hw.get("gpu")}** cuenta con **2 GB de VRAM**, mientras que el modelo actual pesa **~2.4 GB** en memoria.
 - **Causa Raíz:** Al no caber por completo en la VRAM, Ollama descarga ~74% de las capas a la CPU del sistema, lo que reduce la velocidad de generación a ~5 tok/s (~19s por respuesta).
 - **Determinismo vs IA:** Recordar que la detección de amenazas (beaconing, entropía DGA, escaneos) es **100% determinista** en Python. El LLM actúa únicamente como sintetizador y explicador, por lo que una menor velocidad de inferencia no afecta la precisión de detección.
                 """
@@ -1553,9 +1996,9 @@ with tab_perf:
                 st.markdown(
                     f"""
 <div style="background: var(--ainoc-panel); border: 1px solid {border_color}; padding: 10px 14px; border-radius: 8px; margin-bottom: 8px;">
-    <strong>{item['option']}</strong> <span style="font-size: 0.75rem; float: right; color: var(--ainoc-muted);">{badge}</span><br>
-    <small style="color: var(--ainoc-accent);">VRAM: {item['vram']} · Velocidad: {item['speed']}</small><br>
-    <span style="font-size: 0.82rem;">{item['description']}</span>
+    <strong>{item["option"]}</strong> <span style="font-size: 0.75rem; float: right; color: var(--ainoc-muted);">{badge}</span><br>
+    <small style="color: var(--ainoc-accent);">VRAM: {item["vram"]} · Velocidad: {item["speed"]}</small><br>
+    <span style="font-size: 0.82rem;">{item["description"]}</span>
 </div>
                     """,
                     unsafe_allow_html=True,
@@ -1566,7 +2009,9 @@ with tab_perf:
         # Gráficos de latencia temporal
         st.markdown("#### 📈 Historial Dinámico de Tiempos de Respuesta")
         if not history_p:
-            st.info("Aún no hay llamadas registradas en la base de datos. Generá eventos o realiza consultas para alimentar las estadísticas.")
+            st.info(
+                "Aún no hay llamadas registradas en la base de datos. Generá eventos o realiza consultas para alimentar las estadísticas."
+            )
         else:
             import plotly.graph_objects as go
 
@@ -1619,7 +2064,7 @@ with tab_perf:
                 )
 
 # ── TAB ACERCA DEL PROYECTO ───────────────────────────────────────────────────
-with tab_about:
+elif _tab == "ℹ️ Acerca del proyecto":
     st.markdown("### Acerca del proyecto")
 
     # ── Sección: El problema ──
@@ -1636,7 +2081,9 @@ Administrador de red de una empresa con arquitectura hub-and-spoke (sucursales c
     try:
         st.image(arch_img_path, caption="Arquitectura del sistema")
     except Exception:
-        st.info(f"📐 Diagrama de arquitectura pendiente — se generará en Fase 3 del plan. Ruta esperada: `{arch_img_path}`")
+        st.info(
+            f"📐 Diagrama de arquitectura pendiente — se generará en Fase 3 del plan. Ruta esperada: `{arch_img_path}`"
+        )
 
     # ── Sección: Decisiones de diseño clave ──
     st.markdown("#### Decisiones de diseño clave")
@@ -1707,8 +2154,13 @@ Administrador de red de una empresa con arquitectura hub-and-spoke (sucursales c
             elif p["status"] == "in_progress":
                 st.markdown('<span class="ainoc-badge-medium">⟳ En progreso</span>', unsafe_allow_html=True)
             else:
-                st.markdown('<span style="color: var(--ainoc-muted); font-size: 0.7rem; font-family: JetBrains Mono, monospace;">⬜ Pendiente</span>', unsafe_allow_html=True)
+                st.markdown(
+                    '<span style="color: var(--ainoc-muted); font-size: 0.7rem; font-family: JetBrains Mono, monospace;">⬜ Pendiente</span>',
+                    unsafe_allow_html=True,
+                )
         st.progress(p["progress"] / 100)
 
     st.markdown("")
-    st.link_button("🔗 Ver en GitHub", "https://github.com/0xmarcosdev/ai-noc-copilot", use_container_width=True)
+    st.link_button(
+        "🔗 Ver en GitHub", "https://github.com/0xmarcosdev/ai-noc-copilot", use_container_width=True
+    )

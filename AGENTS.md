@@ -17,6 +17,8 @@ Copiloto local air-gapped de logs de pfSense (FastAPI + SQLModel/SQLite + Stream
 - **`classify_port_pattern` (main.py) es determinista, no re-analiza con LLM**: clasifica `fuerza_bruta` / `escaneo_puertos` / `None` según la proporción de puertos destino distintos en el grupo (`MIN_EVENTS_FOR_PORT_PATTERN`, `BRUTEFORCE_MAX_RATIO`, `PORTSCAN_MIN_RATIO` al inicio del archivo). El resultado se pasa como texto de contexto al prompt del LLM, nunca al revés.
 - **`SQLModel.metadata.create_all()` no migra columnas nuevas en SQLite existente.** Si agregás un campo a `NetworkEvent` (como `correlation_group`), una DB vieja no lo va a tener y va a fallar en runtime, no en el `lifespan`. En desarrollo la solución es borrar el `.db` y dejar que se recree; no hay migración automática todavía (ver limitación documentada en `SPEC.md` §7).
 - **Ollama corre nativo en el host, NO en Docker.** `docker-compose.yml` solo levanta backend+frontend y es solo para el entregable del curso; el desarrollo diario corre con venv. El modelo real de desarrollo es `my-qwen-3b:latest` (`.env.example`, SPEC, scripts) -- si ves `qwen2.5:3b-instruct` en algún lado, es un valor viejo, corregirlo a `my-qwen-3b:latest`.
+- La navegación del dashboard usa st.radio + session_state.main_tab, no st.tabs (los tabs de Streamlit no conservan la pestaña al rerun).
+- No asumir que correlation-history trae explanation; la UI puede usar caché corr_expl.
 
 ## Comandos
 
