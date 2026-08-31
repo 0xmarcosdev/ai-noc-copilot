@@ -35,7 +35,7 @@ IA, documentación (este archivo + README + Swagger), testing, demo.
 - Análisis de eventos individuales vía LLM local (severidad, tipo, explicación).
 - Generación de datos sintéticos para pruebas (no depende de pfSense disponible).
 - Dashboard web (Streamlit): Eventos (filtros/paginación), Chat, Correlación (histórico tabular + detalles), Rendimiento, Acerca.
-- Correlación: detección determinista + LLM en /events/correlate; la UI puede re-explicar vía evento ancla y caché de sesión hasta que el histórico exponga explanation.(ver §7).
+- Correlación: detección determinista + LLM en /events/correlate; la UI puede re-explicar vía evento ancla y caché de sesión hasta que el histórico exponga explanation (ver §7).
 
 ### Fuera de alcance (Roadmap, no se construye ahora)
 
@@ -52,18 +52,18 @@ IA, documentación (este archivo + README + Swagger), testing, demo.
 
 ```
 pfSense (o generador sintético) --UDP syslog:5514--> syslog_listener.py
-                                                            |
-                                                            v
-                                                    SQLite (NetworkEvent)
-                                                            |
-                              GET /events   <----+----> POST /events/{id}/analyze
-                                                            |
-                                                            v
-                                              llm_service.py --HTTP--> Ollama
-                                                            (my-qwen-3b:latest, nativo en host)
-                                                            |
-                                                            v
-                                              Streamlit dashboard (chat + eventos)
+                                                             |
+                                                             v
+                                                     SQLite (NetworkEvent)
+                                                             |
+                               GET /events   <----+----> POST /events/{id}/analyze
+                                                             |
+                                                             v
+                                               llm_service.py --HTTP--> Ollama
+                                                             (my-qwen-3b:latest, nativo en host)
+                                                             |
+                                                             v
+                                               Streamlit dashboard (chat + eventos)
 ```
 
 **Decisión de diseño clave**: Ollama corre nativo en el host, no en
@@ -228,7 +228,7 @@ anotaciones (PEP 649). No parchear el código para 3.14; fijar la versión
 de Python en su lugar (consistente con `python:3.11-slim` del Dockerfile).
 
 **Gráficos interactivos (Fase 5.9)**: se agregó `plotly==6.0.1` al
-`requirements.txt` para gráficos interactivos en el dashboard (pie charts,
+`frontend/requirements.txt` para gráficos interactivos en el dashboard (pie charts,
 barras, series temporales). Plotly funciona 100% offline una vez
 instalado — no realiza llamadas de red, ni usa CDN, ni descarga assets
 en runtime. Es la misma categoría de dependencia que Ollama: se instala
@@ -261,4 +261,4 @@ no desde ningún CDN externo.
   sección correspondiente.
 
 ---
-*Última actualización: 29 ago 2026 — UI correlación tabular, navegación por radio, pestañas rendimiento/acerca.*
+*Última actualización: 31 ago 2026 — UI correlación tabular, navegación por radio, pestañas Rendimiento/Acerca, caché de explicación en sesión, limitaciones de re-explicar.*

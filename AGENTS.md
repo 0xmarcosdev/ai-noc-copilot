@@ -11,7 +11,7 @@ Copiloto local air-gapped de logs de pfSense (FastAPI + SQLModel/SQLite + Stream
 ## Arquitectura (gotchas no obvios)
 
 - `backend/app/main.py` es el único entrypoint (`uvicorn app.main:app`). Escucha syslog UDP en `5514` (tarea asíncrona en `syslog_listener.py`).
-- **`NetworkEvent.source_ip` NO es la IP del atacante**: es la IP del paquete UDP de syslog (el propio pfSense). Toda correlación extrae la IP real del `raw_message` con regex (`extract_attacker_ip` en `main.py:46`). No cambiar esto a `source_ip`.
+- **`NetworkEvent.source_ip` NO es la IP del atacante**: es la IP del paquete UDP de syslog (el propio pfSense). Toda correlación extrae la IP real del `raw_message` con regex (`extract_attacker_ip` en `main.py:51`). No cambiar esto a `source_ip`.
 - **La detección es determinista, el LLM solo explica**: beaconing = coeficiente de variación de intervalos (`main.py`), DGA = entropía de Shannon (`dns_heuristics.py`). El LLM recibe el hallazgo ya detectado y redacta la explicación. No pedirle al LLM que decida solo si algo es malicioso.
 - **Contrato del LLM**: 4 claves JSON estrictas (`severity`, `event_type`, `explanation`, `recommended_action`), prompts en `backend/app/prompts/*.txt`, llamado con `"format": "json"` y `temperature: 0.1`. No cambiar el contrato sin avisar explícitamente que rompe los consumidores en `main.py` (punto de acoplamiento más frágil).
 - **`classify_port_pattern` (main.py) es determinista, no re-analiza con LLM**: clasifica `fuerza_bruta` / `escaneo_puertos` / `None` según la proporción de puertos destino distintos en el grupo (`MIN_EVENTS_FOR_PORT_PATTERN`, `BRUTEFORCE_MAX_RATIO`, `PORTSCAN_MIN_RATIO` al inicio del archivo). El resultado se pasa como texto de contexto al prompt del LLM, nunca al revés.
@@ -45,6 +45,7 @@ Ollama no es servicio ni está en autorun: verificar con `curl http://localhost:
 - `.env` está gitignoreado. `backend/.env` (`OLLAMA_HOST`, `OLLAMA_MODEL`, `DB_PATH`, `SYSLOG_PORT`) se carga automáticamente; `frontend/.env` (`BACKEND_URL`) se lee en `dashboard.py`.
 - **Docker (despliegue, solo para el entregable del curso):** este equipo no tiene Docker instalado, así que el despliegue se valida por inspección, no en runtime. Prerequisitos de `docker compose up`: (1) Ollama bindeado a `0.0.0.0:11434`, no solo `127.0.0.1` — el contenedor lo alcanza vía `host.docker.internal`; (2) el backend de la Opción A detenido, o falla por puertos `8000`/`5514` compartidos. Hay `.dockerignore` en backend/ y frontend/ (excluye `.venv` ~400MB del contexto de build) y healthcheck del backend en el compose.
 - Lint: config de ruff en `pyproject.toml` (line-length 110; DTZ003/DTZ005 ignorados por decisión documentada — datetimes naive UTC). Ruff está en el venv pero ya no está en `requirements.txt`. No hay typecheck configurado. No inventar comandos de lint.
+- **Dependencias**: `plotly` solo en `frontend/requirements.txt` (gráficos interactivos offline). NO está en `backend/requirements.txt`.
 
 ## Testing
 

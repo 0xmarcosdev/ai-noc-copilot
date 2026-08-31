@@ -2077,12 +2077,12 @@ Administrador de red de una empresa con arquitectura hub-and-spoke (sucursales c
 
     # ── Sección: Arquitectura ──
     st.markdown("#### Arquitectura")
-    arch_img_path = "docs/diagrams/arquitectura.png"
+    arch_img_path = "frontend/ai-noc-slides/diagrams/arquitectura.svg"
     try:
-        st.image(arch_img_path, caption="Arquitectura del sistema")
+        st.image(arch_img_path, caption="Arquitectura del sistema AI-NOC Copilot")
     except Exception:
         st.info(
-            f"📐 Diagrama de arquitectura pendiente — se generará en Fase 3 del plan. Ruta esperada: `{arch_img_path}`"
+            f"📐 Diagrama de arquitectura no encontrado en `{arch_img_path}`"
         )
 
     # ── Sección: Decisiones de diseño clave ──
@@ -2099,7 +2099,7 @@ Administrador de red de una empresa con arquitectura hub-and-spoke (sucursales c
         },
         {
             "title": "IP atacante se extrae del raw_message",
-            "desc": "`NetworkEvent.source_ip` es la IP del paquete UDP (el propio pfSense). La IP real del atacante se extrae con regex del `raw_message` (`extract_attacker_ip` en `main.py:46`). No cambiar a `source_ip` (AGENTS §11).",
+            "desc": "`NetworkEvent.source_ip` es la IP del paquete UDP (el propio pfSense). La IP real del atacante se extrae con regex del `raw_message` (`extract_attacker_ip` en `main.py:51`). No cambiar a `source_ip` (AGENTS §11).",
         },
         {
             "title": "Contrato LLM inmutable (4 claves JSON)",
@@ -2136,11 +2136,12 @@ Administrador de red de una empresa con arquitectura hub-and-spoke (sucursales c
         {"name": "Fase 3 — Datos sintéticos y verificación", "status": "done", "progress": 100},
         {"name": "Fase 4 — Correlación de eventos", "status": "done", "progress": 100},
         {"name": "Fase 5.5 — Detección extendida", "status": "done", "progress": 100},
-        {"name": "Fase 5.6 — Ingesta manual de logs", "status": "in_progress", "progress": 80},
+        {"name": "Fase 5.6 — Ingesta manual de logs", "status": "done", "progress": 100},
         {"name": "Fase 5.7 — Búsqueda, filtros y paginación", "status": "done", "progress": 100},
         {"name": "Fase 5.8 — Persistencia y clasificación de correlación", "status": "done", "progress": 100},
         {"name": "Fase 5.9 — Estadísticas y gráficos", "status": "done", "progress": 100},
         {"name": "Fase 5.10 — Chat interactivo y Rendimiento", "status": "done", "progress": 100},
+        {"name": "Fase 5.11 — UI de correlación (histórico tabular)", "status": "done", "progress": 100},
         {"name": "Fase 6 — Documentación y entrega", "status": "pending", "progress": 30},
     ]
 

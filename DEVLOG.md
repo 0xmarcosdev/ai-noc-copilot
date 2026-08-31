@@ -515,3 +515,37 @@ y se estabilizó el estado de la UI tras `st.rerun()` (explicar, correlacionar, 
 - Opcional backend: persistir `explanation` a nivel grupo o
   `POST /events/groups/{id}/explain`.
 - Fase 6: demo, evidencia IA, Docker end-to-end.
+
+## Sesión 19 — 31 ago 2026
+**Asistente de IA**: OpenCode  
+**Tema**: Limpieza y consolidación pre-MVP  
+**Duración**: ~1 hora
+
+### Limpieza de archivos
+- Eliminados 4 dumps crudos de sesión OpenCode de la raíz:
+  - `chat_service_opencode_session-ses_fc8e.md` (268 KB)
+  - `opencode_diagnostico_de_latencia_session-ses_fc95.md` (169 KB)
+  - `Resumen_de_la_fase_5.10_completada.md` (1 KB)
+  - `plan_maestro.md` (48 KB)
+- Eliminadas 5 transcripciones completas >50 KB de `docs/ai-sessions/`:
+  - `2026-08-19-opencode-docker-y-ingesta.md` (261 KB)
+  - `2026-08-20-opencode-busqueda-filtros-y-paginacion.md` (340 KB)
+  - `2026-08-20-opencode-manual-ingest.md` (352 KB)
+  - `22-ago-latets_session-ses_fe00.md` (207 KB)
+  - `visual_identity_session-ses_fe00.md` (106 KB)
+- Eliminados duplicados en `docs/ai-sessions/` (canónicos en `docs/`):
+  - `branding.md`
+  - `isotype.md`
+- Actualizado `docs/ai-sessions/README.md` para reflejar solo los archivos que quedan.
+
+### Alineación de documentación
+- `ROADMAP.md`: Fase 5.6 cerrada (ítem de lote real sanitizado marcado como opcional), Fase 5.11 cerrada, tabla de versiones actualizada, checkboxes residuales limpiados.
+- `docs/SPEC.md`: Sección de dashboard actualizada (pestañas actuales, comportamiento de Correlación con tabla + caché de explicación en sesión + limitaciones del re-explicar), fecha de "Última actualización" puesta al 31 ago 2026.
+- `AGENTS.md`: Referencia a `extract_attacker_ip` verificada (línea 51), nota añadida de que `plotly` solo debe estar en `frontend/requirements.txt`.
+- `DEVLOG.md`: Esta entrada.
+- `.gitignore`: Patrones modernos ya presentes (`.pytest_cache/`, `.ruff_cache/`, `*.log`), sin cambios necesarios.
+
+### Código y calidad
+- `plotly` eliminado de `backend/requirements.txt` (solo en frontend).
+- Pendiente: ejecutar `ruff check app tests` y `pytest tests -v` desde `backend/`.
+- Comentarios en `main.py`, `llm_service.py`, `chat_service.py` y `dashboard.py` revisados (español, precisión, coherencia con SPEC/AGENTS).

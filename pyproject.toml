@@ -16,3 +16,9 @@ ignore = [
     "DTZ003",
     "DTZ005",
 ]
+
+[tool.pytest.ini_options]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::PendingDeprecationWarning",
+]

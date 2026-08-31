@@ -5,7 +5,7 @@ from collections import defaultdict
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Annotated, Literal, Optional
+from typing import Annotated, Literal
 
 from dotenv import load_dotenv
 
@@ -135,9 +135,11 @@ def performance_stats():
     Devuelve estadísticas acumuladas y recientes de rendimiento de LLM (/api/generate)
     para el apartado de rendimiento y trade-offs del dashboard.
     """
-    from app.models import LLMTiming
-    from sqlmodel import select, func
     import os
+
+    from sqlmodel import func, select
+
+    from app.models import LLMTiming
 
     with Session(engine) as session:
         timings = session.exec(select(LLMTiming).order_by(LLMTiming.timestamp.desc()).limit(100)).all()
@@ -308,7 +310,7 @@ def list_events(
 
 
 @app.get("/events/correlation-history")
-def correlation_history(limit: Optional[int] = 50):
+def correlation_history(limit: int | None = 50):
     """Historial de grupos de correlación agrupados por correlation_group."""
     # Si por alguna razón llega None, usamos 50
     actual_limit = limit if limit is not None else 50

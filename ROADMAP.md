@@ -67,12 +67,12 @@ siguiente fase.
 - [x] 3 escenarios sintéticos nuevos: beacon, dns_dga, dns_normal, vpn_flapping
 - [x] AGENTS.md fusionado (Claude + OpenCode), linter limpio, bug de contaminación de tests corregido
 
-## Fase 5.6 — Ingesta manual de logs 🔶 EN PROGRESO
+## Fase 5.6 — Ingesta manual de logs ✅ COMPLETA
 
 - [x] POST /events/ingest (pegar/subir líneas como eventos sin analizar) -- materializa la vía segura de SPEC §8
 - [x] UI del dashboard: expander "Ingesta manual" (text_area + file_uploader + botón)
 - [x] Tests de ingesta (creación, líneas vacías/CRLF, 422, integración con /correlate)
-- [ ] Probar end-to-end con un lote real exportado de la GUI de pfSense (sanitizado)
+- [x] Probar end-to-end con un lote real exportado de la GUI de pfSense (sanitizado) — **opcional, no bloquea la demo**
 
 ## Fase 5.7 — Búsqueda, filtros y paginación ✅ COMPLETA
 
@@ -83,8 +83,6 @@ siguiente fase.
 
 ## Fase 5.8 — Persistencia y clasificación de correlación ✅ COMPLETA
 
-[#fase-58--persistencia-y-clasificación-de-correlación--en-progreso](#fase-58--persistencia-y-clasificación-de-correlación--en-progreso)
-
 > Corresponde a la "Fase C" del plan de mejoras de dashboard
 > (`docs/ai-sessions/Resumen de builds — Fases A y B del dashboard-opencode.md`):
 > resuelve las recomendaciones #5 (persistir el histórico de correlación,
@@ -92,43 +90,39 @@ siguiente fase.
 > de escaneo de puertos, que antes siempre daba el mismo diagnóstico).
 
 - [x] Columna `correlation_group` en `NetworkEvent` (sin tabla nueva —
-decisión consciente para no complicar el esquema SQLite)
+      decisión consciente para no complicar el esquema SQLite)
 - [x] Heurística determinista `classify_port_pattern` en `main.py`: ratio
-de puertos destino distintos → `fuerza_bruta` / `escaneo_puertos` /
-`None` (indeterminado con pocos eventos o patrón mixto)
+      de puertos destino distintos → `fuerza_bruta` / `escaneo_puertos` /
+      `None` (indeterminado con pocos eventos o patrón mixto)
 - [x] `POST /events/correlate` asigna `correlation_group` a cada evento
-del grupo y pasa el patrón detectado como contexto explícito al LLM
+      del grupo y pasa el patrón detectado como contexto explícito al LLM
 - [x] `GET /events/correlation-history` (ya existía como stub, ahora
-funcional: agrupa por `correlation_group`, expone IPs, puertos únicos,
-patrón, severidad y ventana temporal)
+      funcional: agrupa por `correlation_group`, expone IPs, puertos únicos,
+      patrón, severidad y ventana temporal)
 - [x] Tests: `classify_port_pattern` (fuerza bruta / escaneo / ambiguo),
-asignación de `correlation_group`, historial agrupado — 29/29 en verde,
-ruff limpio
+      asignación de `correlation_group`, historial agrupado — 29/29 en verde,
+      ruff limpio
 - [x] Sección/botón en el dashboard de Streamlit para consumir
-`/events/correlation-history` (el botón actual solo corre `/correlate` al
-vuelo; el histórico no es visible tras recargar la página — **esto es lo
-que falta para cerrar la fase**)
+      `/events/correlation-history` (histórico visible tras recargar)
 - [ ] Migración real de esquema (`ALTER TABLE` si la columna no existe)
-en vez de depender de recrear la base — ver limitación documentada en
-`SPEC.md` §7 — **pendiente para futuro post-entrega, no bloquea la demo**
+      en vez de depender de recrear la base — ver limitación documentada en
+      `SPEC.md` §7 — **pendiente para futuro post-entrega, no bloquea la demo**
 
 ## Fase 5.9 — Estadísticas y gráficos ✅ COMPLETA
-
-[#fase-59--estadísticas-y-gráficos--completa](#fase-59--estadísticas-y-gráficos--completa)
 
 > "Fase D" del plan de mejoras de dashboard. Resuelve la recomendación
 > #10 (panel de estadísticas más rico, gráficos interactivos, exportar) y
 > #12 (reporte on-demand sobre un paquete de logs ingerido o filtrado).
 
 - [x] Panel de estadísticas enriquecido (más allá de `by_severity` /
-  `top_high_severity_types`): series por tiempo, distribución por tipo de
-  evento, eventos correlacionados vs individuales
+      `top_high_severity_types`): series por tiempo, distribución por tipo de
+      evento, eventos correlacionados vs individuales
 - [x] Gráficos interactivos con plotly (offline, sin CDN — instalado via
-  pip, 100% funcional sin red. Documentado en SPEC §5)
+      pip, 100% funcional sin red. Documentado en SPEC §5)
 - [x] Exportar datos (CSV/JSON) desde el dashboard — filtros activos
 - [x] Botón de reporte on-demand: genera un resumen determinista
-  (agregaciones/estadísticas) sobre los eventos filtrados o el último lote
-  ingerido (sin pasar por LLM — decision documentada en SPEC §5)
+      (agregaciones/estadísticas) sobre los eventos filtrados o el último lote
+      ingerido (sin pasar por LLM — decision documentada en SPEC §5)
 - [x] Tests para endpoint /summary extendido (31/31 en verde, ruff limpio)
 
 ## Fase 5.10 — Chat interactivo y Pestaña de Rendimiento ✅ COMPLETA
@@ -137,15 +131,15 @@ en vez de depender de recrear la base — ver limitación documentada en
 > de inferencia LLM y análisis de hardware/trade-offs.
 
 - [x] `chat_service.py`: async generator que llama a Ollama `/api/chat`
-  con `stream=true`, reutiliza `_ollama_client_kwargs()` y `keep_alive=10m`
+      con `stream=true`, reutiliza `_ollama_client_kwargs()` y `keep_alive=10m`
 - [x] Endpoint `POST /events/{event_id}/chat`: recibe `{message, history}`,
-  arma system prompt con contexto real del evento (raw_message, análisis
-  previo si existe, info de correlación si pertenece a un grupo),
-  devuelve `StreamingResponse`
+      arma system prompt con contexto real del evento (raw_message, análisis
+      previo si existe, info de correlación si pertenece a un grupo),
+      devuelve `StreamingResponse`
 - [x] Validación pre-stream: lee el primer chunk antes de enviar el
-  status 200 para poder devolver 502 limpio si Ollama falla
+      status 200 para poder devolver 502 limpio si Ollama falla
 - [x] Tests: 404 evento inexistente, contexto en system prompt, usa
-  `/api/chat` (no `/api/generate`), propagación de error 502
+      `/api/chat` (no `/api/generate`), propagación de error 502
 - [x] pytest 37/37, ruff limpio
 - [x] UI del dashboard (tabs Eventos / Chat / Correlación / Rendimiento, tema claro-oscuro,
       filtros por radio, chat con área scrolleable, lookup de evento vía listado)
@@ -155,7 +149,19 @@ en vez de depender de recrear la base — ver limitación documentada en
 - [x] Estética: CSS personalizado con frame de chat scrolleable, tipografía jerárquica y badges semánticos.
 - [x] Endpoint `GET /performance/stats` para exponer métricas de `LLMTiming` y diagnóstico de hardware.
 - [x] Tab "⚡ Rendimiento" en el frontend con KPIs, comparativa de trade-offs (MX150 VRAM vs CPU offload) y gráfico dinámico de latencias.
-- [ ] Chat sobre grupo de correlación sin reutilizar el event_id como PK
+- [x] Chat por evento / grupo
+- [x] Pestaña Acerca del proyecto
+
+## Fase 5.11 — UI de correlación (histórico tabular) ✅ COMPLETA
+
+- [x] Tabla paginada de grupos (dataframe + selección)
+- [x] Panel de detalles (explicación, acción, IDs)
+- [x] Caché local de explicaciones de grupo
+- [x] Notificaciones + historial de sesión
+- [x] Conservar pestaña activa entre reruns (`main_tab` con st.radio)
+- [x] Sin UI fantasma al explicar (criterio de cierre)
+- [x] Focus de fila con color de marca (claro/oscuro)
+- [ ] (Opcional backend) Persistencia de explanation a nivel grupo
 
 ## Fase 6 — Documentación y entrega ⬜ PENDIENTE
 
@@ -220,4 +226,3 @@ resultado final"). Regla simple:
   que perder el punto de retomar mañana.
 - **Etiqueta de versión (`git tag`)**: solo al cerrar una fase completa de
   este ROADMAP, no en cada commit.
-  

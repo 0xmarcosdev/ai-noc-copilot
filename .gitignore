@@ -6,3 +6,10 @@ data/
 .venv/
 venv/
 .streamlit/
+*.log
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+.DS_Store
+docs/ai-sessions/*session*.md   # o un patrón más amplio si querés
+ai-noc-slides/*

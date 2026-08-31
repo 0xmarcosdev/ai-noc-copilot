@@ -6,7 +6,7 @@
 
 - [ ] Ollama corriendo: `curl http://localhost:11434/api/tags` → debe devolver la lista de modelos
 - [ ] Backend corriendo: `curl http://localhost:8000/health` → `{"status":"ok"}`
-- [ ] Frontend corriendo: abrir http://localhost:8501 en el navegador
+- [ ] Frontend corriendo: abrir <http://localhost:8501> en el navegador
 - [ ] Base de datos limpia (opcional pero recomendado): borrar `backend/data/ai_noc.db` y reiniciar el backend para partir de cero
 - [ ] Terminal de PowerShell visible con los logs del backend (para mostrar la ingesta en tiempo real)
 - [ ] Navegador con el dashboard abierto en pantalla completa (ocultar barras de favoritos)
@@ -82,11 +82,13 @@ Explicar brevemente:
 ### Escena 6 — Ingesta manual y exportación (1.5 minutos)
 
 **Parte A — Ingesta manual (30 segundos):**
+
 1. Pegar 2–3 líneas de log real de pfSense (sanitizado) en el expander "Ingesta manual".
 2. Hacer click en "Ingerir".
 3. Mostrar que los nuevos eventos aparecen en la tabla.
 
 **Parte B — Exportar (1 minuto):**
+
 1. Mostrar los botones de descarga CSV y JSON.
 2. Descargar un archivo y abrirlo brevemente para mostrar el formato.
 3. Generar un reporte on-demand y descargar el Markdown resultante.
