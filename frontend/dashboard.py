@@ -2077,13 +2077,11 @@ Administrador de red de una empresa con arquitectura hub-and-spoke (sucursales c
 
     # ── Sección: Arquitectura ──
     st.markdown("#### Arquitectura")
-    arch_img_path = "frontend/ai-noc-slides/diagrams/arquitectura.svg"
+    arch_img_path = "ai-noc-slides/diagrams/arquitectura.svg"
     try:
         st.image(arch_img_path, caption="Arquitectura del sistema AI-NOC Copilot")
     except Exception:
-        st.info(
-            f"📐 Diagrama de arquitectura no encontrado en `{arch_img_path}`"
-        )
+        st.info(f"📐 Diagrama de arquitectura no encontrado en `{arch_img_path}`")
 
     # ── Sección: Decisiones de diseño clave ──
     st.markdown("#### Decisiones de diseño clave")
