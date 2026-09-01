@@ -20,6 +20,8 @@ logger = logging.getLogger("syslog_listener")
 
 
 class SyslogProtocol(asyncio.DatagramProtocol):
+    """Protocolo UDP para recibir logs de syslog y guardarlos en BD."""
+
     def __init__(self, engine):
         self.engine = engine
 
@@ -38,6 +40,16 @@ class SyslogProtocol(asyncio.DatagramProtocol):
 
 
 async def start_syslog_listener(engine, host: str, port: int):
+    """Arranca el listener UDP de syslog en el host/puerto indicados.
+
+    Args:
+        engine: Motor SQLAlchemy para la BD.
+        host: IP donde escuchar (ej. "0.0.0.0" para todas).
+        port: Puerto UDP (por defecto 5514).
+
+    Returns:
+        Transporte asyncio para poder cerrarlo en shutdown.
+    """
     loop = asyncio.get_running_loop()
     transport, _ = await loop.create_datagram_endpoint(
         lambda: SyslogProtocol(engine),

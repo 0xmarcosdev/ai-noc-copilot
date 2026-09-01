@@ -12,6 +12,18 @@ from sqlmodel import Field, SQLModel
 
 
 class NetworkEvent(SQLModel, table=True):
+    """Evento de red individual almacenado en SQLite.
+
+    Campos clave:
+    - id: PK autoincremental
+    - received_at: timestamp de ingesta (UTC naive)
+    - source_ip: IP del paquete UDP syslog (el pfSense), NO el atacante
+    - raw_message: línea cruda del log sin parsear
+    - severity/event_type/ai_explanation: rellenados por el LLM tras /analyze
+    - analyzed: flag booleano
+    - correlation_group: ID de grupo asignado por /events/correlate
+    """
+
     id: int | None = Field(default=None, primary_key=True)
     received_at: datetime = Field(default_factory=datetime.utcnow, index=True)
     source_ip: str | None = Field(default=None, index=True)
@@ -28,7 +40,7 @@ class LLMTiming(SQLModel, table=True):
     """Registro de métricas de cada llamada a la API de Ollama /api/generate.
 
     Se escribe desde _call_ollama() en llm_service.py y se consulta desde
-    el endpoint GET /performance/history y el dashboard de rendimiento.
+    el endpoint GET /performance/stats y el dashboard de rendimiento.
     """
 
     id: int | None = Field(default=None, primary_key=True)

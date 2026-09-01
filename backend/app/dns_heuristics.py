@@ -18,6 +18,14 @@ from collections import Counter
 
 
 def shannon_entropy(s: str) -> float:
+    """Calcula la entropía de Shannon de una cadena.
+
+    Args:
+        s: Cadena de texto (ej. nombre de dominio).
+
+    Returns:
+        Entropía en bits por carácter. 0.0 si la cadena está vacía.
+    """
     if not s:
         return 0.0
     counts = Counter(s)
@@ -33,9 +41,17 @@ def looks_like_dga(domain: str, entropy_threshold: float = 3.5) -> bool:
     2. El subdominio más a la izquierda -- típico de túneles DNS /
        exfiltración de datos, que codifican información ahí en vez de
        en el dominio registrado (ej. "aGVsbG8gd29ybGQ.tunnel.evil.net").
+
     Los guiones se ignoran para el cálculo de entropía (palabras legítimas
     con guión, como "actualizacion-windows", no deben marcarse como DGA
     solo por tener más variedad de caracteres).
+
+    Args:
+        domain: Nombre de dominio completo.
+        entropy_threshold: Umbral de entropía (bits/carácter) para marcar como sospechoso.
+
+    Returns:
+        True si el dominio parece generado algorítmicamente, False en caso contrario.
     """
     labels = [l for l in domain.lower().strip(".").split(".") if l]
     if len(labels) < 2:

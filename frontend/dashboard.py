@@ -1,3 +1,11 @@
+"""
+Dashboard principal de AI-NOC Copilot (Streamlit).
+
+Interfaz web para visualizar eventos de red, chatear con el LLM local,
+correlacionar patrones de ataque, ver métricas de rendimiento y consultar
+información del proyecto. Todo corre 100% offline en la red del usuario.
+"""
+
 import csv
 import html
 import io
@@ -38,11 +46,13 @@ PATTERN_ICONS = {
 
 
 def _parse_id(texto: str) -> int | None:
+    """Convierte un string a entero si es un número válido."""
     texto = (texto or "").strip()
     return int(texto) if texto.isdigit() else None
 
 
 def _fmt_ports(ports, max_show: int = 4) -> str:
+    """Formatea lista de puertos para mostrar, truncando si hay muchos."""
     if not ports:
         return "—"
     try:
@@ -55,6 +65,7 @@ def _fmt_ports(ports, max_show: int = 4) -> str:
 
 
 def _fmt_ts_short(value) -> str:
+    """Formatea timestamp ISO a formato corto DD/MM HH:MM."""
     if not value:
         return "—"
     try:
@@ -65,6 +76,7 @@ def _fmt_ts_short(value) -> str:
 
 
 def _store_group_explanation(gid, event_ids, explanation: str, action: str = "", severity: str | None = None):
+    """Guarda la explicación de un grupo en el session_state (caché de sesión)."""
     if "corr_expl" not in st.session_state:
         st.session_state.corr_expl = {}
     if "corr_expl_by_ids" not in st.session_state:
@@ -82,6 +94,7 @@ def _store_group_explanation(gid, event_ids, explanation: str, action: str = "",
 
 
 def _group_explanation(g: dict) -> str | None:
+    """Recupera la explicación cacheada de un grupo, probando varias claves."""
     if "corr_expl" not in st.session_state:
         st.session_state.corr_expl = {}
     if "corr_expl_by_ids" not in st.session_state:
@@ -112,6 +125,7 @@ def _group_explanation(g: dict) -> str | None:
 
 
 def _severity_title_badge(severity: str | None, analyzed: bool = True) -> str:
+    """Badge compacto para el título del expander del evento."""
     sev = severity or "low"
     icon = SEVERITY_COLORS.get(sev, "⚪")
     check = "✓" if analyzed else ""
@@ -119,6 +133,7 @@ def _severity_title_badge(severity: str | None, analyzed: bool = True) -> str:
 
 
 def _severity_content_badge(severity: str | None, analyzed: bool = True) -> str:
+    """Badge HTML con estilos para el contenido del evento."""
     sev = severity or "low"
     icon = SEVERITY_COLORS.get(sev, "⚪")
     badge_class = f"ainoc-badge-{sev}"
@@ -127,6 +142,7 @@ def _severity_content_badge(severity: str | None, analyzed: bool = True) -> str:
 
 
 def _event_header(event: dict) -> str:
+    """Genera el header del expander del evento: badge, ID, timestamp, IP, tipo, grupo."""
     received_dt = event["received_at"]
     if isinstance(received_dt, str):
         received_dt = datetime.fromisoformat(received_dt.replace("Z", "+00:00"))

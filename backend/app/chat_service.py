@@ -1,5 +1,6 @@
 """
 Cliente para chat interactivo con Ollama vía /api/chat (streaming).
+
 Reutiliza la configuración de httpx de llm_service.py para no
 duplicar timeouts ni manejo de errores.
 """
@@ -33,6 +34,13 @@ async def chat_stream(messages: list[dict], *, keep_alive: str = "10m"):
     llm_service._call_ollama).
 
     Lanza LLMAnalysisError si Ollama no responde o la conexión falla.
+
+    Args:
+        messages: Lista de dicts con "role" y "content" para el chat.
+        keep_alive: Tiempo que el modelo queda cargado en VRAM.
+
+    Yields:
+        Strings con el contenido de cada chunk de la respuesta.
     """
     host, model = _get_config()
 

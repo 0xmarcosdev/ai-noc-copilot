@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" aria-label="AI-NOC Copilot">
+  <defs>
+    <style>
+      .ring { fill: none; stroke: #22D3EE; stroke-width: 2.25; stroke-linecap: round; }
+      .ring-dim { fill: none; stroke: #22D3EE; stroke-width: 1.25; opacity: 0.35; }
+      .node { fill: #22D3EE; }
+      .blip { fill: #22D3EE; }
+      .sweep-line {
+        fill: none; stroke: #22D3EE; stroke-width: 1.75;
+        stroke-linecap: round; opacity: 0.9;
+      }
+      .sweep-wedge { fill: #22D3EE; opacity: 0.14; }
+
+      .sweep-group {
+        transform-origin: 0 0;
+        animation: ainoc-sweep 3s linear infinite;
+        will-change: transform;
+      }
+      .blip { animation: ainoc-pulse 2.4s ease-in-out infinite; }
+      .blip-b { animation-delay: 0.8s; }
+      .blip-c { animation-delay: 1.6s; }
+
+      @keyframes ainoc-sweep {
+        from { transform: rotate(0deg); }
+        to   { transform: rotate(360deg); }
+      }
+      @keyframes ainoc-pulse {
+        0%, 100% { opacity: 1; }
+        50%      { opacity: 0.35; }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .sweep-group, .blip { animation: none !important; }
+      }
+    </style>
+  </defs>
+
+  <circle class="ring" cx="32" cy="32" r="22"></circle>
+  <circle class="ring-dim" cx="32" cy="32" r="14"></circle>
+
+  <g transform="translate(32 32)">
+    <g class="sweep-group">
+      <path class="sweep-wedge" d="M0 0 L0 -22 A22 22 0 0 1 11 -19 Z"></path>
+      <line class="sweep-line" x1="0" y1="0" x2="0" y2="-22"></line>
+    </g>
+  </g>
+
+  <circle class="node" cx="32" cy="32" r="4.5"></circle>
+  <circle class="blip" cx="48.5" cy="20.5" r="2.1"></circle>
+  <circle class="blip blip-b" cx="18" cy="46" r="1.7"></circle>
+  <circle class="blip blip-c" cx="42" cy="48.5" r="1.5"></circle>
+</svg>

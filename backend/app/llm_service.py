@@ -1,5 +1,6 @@
 """
 Cliente delgado sobre la API de Ollama (compatible con /api/generate).
+
 Toda la lógica de "cómo le hablo al LLM" vive aquí para que cambiar
 de modelo (o de motor de inferencia) sea un cambio de una línea, no
 una refactorización.
@@ -31,12 +32,17 @@ CORRELATION_PROMPT_TEMPLATE = CORRELATION_PROMPT_PATH.read_text(encoding="utf-8"
 
 
 class LLMAnalysisError(Exception):
-    pass
+    """Excepción lanzada cuando Ollama falla o devuelve JSON inválido."""
 
 
 def _ollama_client_kwargs() -> dict:
-    # Timeout con fases separadas + sin reutilizar conexiones keep-alive --
-    # evita "Server disconnected without sending a response" (ver DEVLOG).
+    """Configuración compartida del cliente HTTP hacia Ollama.
+
+    - Timeout con fases separadas (conexión 15s, total 120s)
+    - Sin reutilizar conexiones keep-alive: evita "Server disconnected
+      without sending a response" (ver DEVLOG).
+    - trust_env=False: no usar proxy del entorno.
+    """
     return {
         "timeout": httpx.Timeout(120.0, connect=15.0),
         "limits": httpx.Limits(max_keepalive_connections=0, max_connections=5),
@@ -56,6 +62,18 @@ async def _call_ollama(
     Ollama, loguea métricas de tiempos siempre, y devuelve el dict con
     las 4 claves del contrato (severity/event_type/explanation/
     recommended_action).
+
+    Args:
+        prompt: Prompt ya formateado para enviar al modelo.
+        keep_alive: Tiempo que el modelo queda cargado en VRAM (ej. "10m").
+        num_predict: Máximo de tokens a generar.
+        mode: Etiqueta para métricas ("explain_event" o "explain_correlated").
+
+    Returns:
+        Dict con claves: severity, event_type, explanation, recommended_action.
+
+    Raises:
+        LLMAnalysisError: Si Ollama no responde o el JSON es inválido.
     """
     payload = {
         "model": OLLAMA_MODEL,
@@ -132,6 +150,7 @@ async def _call_ollama(
     except json.JSONDecodeError as exc:
         raise LLMAnalysisError(f"Respuesta no es JSON válido: {raw_text[:200]}") from exc
 
+    # Asegurar las 4 claves del contrato (SPEC §6)
     for key in ("severity", "event_type", "explanation", "recommended_action"):
         parsed.setdefault(key, "desconocido")
 
@@ -142,6 +161,7 @@ async def explain_event(log_raw: str) -> dict:
     """
     Envía un evento de log al modelo local y devuelve un dict con
     severity / event_type / explanation / recommended_action.
+
     Lanza LLMAnalysisError si Ollama no responde o el JSON es inválido,
     para que el endpoint decida cómo degradar (ver main.py).
     """

@@ -1,3 +1,16 @@
+"""
+Punto de entrada principal de la API de AI-NOC Copilot.
+
+Expone endpoints REST para:
+- Ingesta y listado de eventos de red (syslog pfSense)
+- Análisis con LLM local (Ollama) de eventos individuales y correlacionados
+- Chat interactivo sobre eventos/grupos
+- Detección determinista de patrones: beaconing, DGA, fuerza bruta, escaneo
+- Estadísticas, rendimiento y correlación histórica
+
+Arranca el listener UDP de syslog en background (puerto 5514 por defecto).
+"""
+
 import logging
 import os
 import re
@@ -9,7 +22,7 @@ from typing import Annotated, Literal
 
 from dotenv import load_dotenv
 
-load_dotenv()  # carga backend/.env si existe -- evita usar export/set a mano en cada terminal
+load_dotenv()  # Carga backend/.env si existe -- evita export/set manual en cada terminal
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
@@ -21,7 +34,7 @@ from app.chat_service import chat_stream
 from app.dns_heuristics import looks_like_dga
 from app.dns_parsing import extract_dns_query
 from app.llm_service import LLMAnalysisError, explain_correlated_events, explain_event
-from app.models import NetworkEvent
+from app.models import LLMTiming, NetworkEvent
 from app.syslog_listener import start_syslog_listener
 
 logging.basicConfig(level=logging.INFO)
@@ -35,9 +48,14 @@ MAX_INGEST_LINES = int(os.getenv("MAX_INGEST_LINES", "5000"))
 
 engine = create_engine(f"sqlite:///{DB_PATH}", connect_args={"check_same_thread": False})
 
+
+# ---------------------------------------------------------------------------
+# Utilidades de extracción desde filterlog (pfSense)
+# ---------------------------------------------------------------------------
+
 # Extrae la IP origen REAL (el atacante) desde el CSV de filterlog.
 # OJO: NetworkEvent.source_ip es la IP que envió el paquete UDP de syslog
-# (el propio pfSense), NO la IP del atacante -- por eso correlacionamos
+# (el propio pfSense), NO la IP del atacante. Por eso correlacionamos
 # usando esta extracción del raw_message, no la columna source_ip.
 # Ver SPEC.md §4 y §7.
 FILTERLOG_IPV4_RE = re.compile(
@@ -49,11 +67,19 @@ FILTERLOG_IPV4_RE = re.compile(
 
 
 def extract_attacker_ip(raw_message: str) -> str | None:
+    """Extrae la IP del atacante desde una línea cruda de filterlog.
+
+    Args:
+        raw_message: Línea completa del log de pfSense en formato filterlog.
+
+    Returns:
+        La IP origen (atacante) como string, o None si no coincide el patrón.
+    """
     match = FILTERLOG_IPV4_RE.search(raw_message)
     return match.group("srcip") if match else None
 
 
-# Extrae accion/direccion + IPs para el detector de beaconing
+# Extrae acción/dirección + IPs para el detector de beaconing
 FILTERLOG_CONNECTION_RE = re.compile(
     r"filterlog:\s*\d+,,[^,]*,\d+,[^,]+,\w+,(?P<action>\w+),(?P<direction>\w+),4,"
     r"[^,]*,[^,]*,\d+,\d+,\d+,\w+,\d+,\w+,"
@@ -63,12 +89,25 @@ FILTERLOG_CONNECTION_RE = re.compile(
 
 
 def extract_connection_summary(raw_message: str) -> dict | None:
+    """Extrae resumen de conexión (acción, dirección, IPs, puertos) de filterlog.
+
+    Args:
+        raw_message: Línea completa del log de pfSense.
+
+    Returns:
+        Diccionario con claves: action, direction, srcip, dstip, srcport, dstport.
+        None si la línea no coincide con el patrón.
+    """
     match = FILTERLOG_CONNECTION_RE.search(raw_message)
     return match.groupdict() if match else None
 
 
+# ---------------------------------------------------------------------------
+# Constantes de clasificación de patrones de puertos
+# ---------------------------------------------------------------------------
+
 # Umbral mínimo de eventos con puerto extraído para animarse a clasificar el
-# patrón -- con pocos eventos (ej. 2) cualquier mezcla de puertos es
+# patrón. Con pocos eventos (ej. 2) cualquier mezcla de puertos es
 # estadísticamente indeterminada, no un escaneo real. Ver Fase 4/§7 SPEC.
 MIN_EVENTS_FOR_PORT_PATTERN = 3
 # Fracción de puertos distintos sobre el total de eventos. Fuerza bruta =
@@ -88,8 +127,14 @@ def classify_port_pattern(events: list[NetworkEvent]) -> str | None:
     Escaneo de puertos: muchos eventos, cada uno contra un puerto destino
     DISTINTO (ej. recorrido secuencial de puertos).
     No decide nada por sí sola sobre severidad/malicia -- eso lo hace el LLM
-    a partir de este hallazgo, nunca al revés (ver SPEC.md §"detección
+    a partir de este hallazgo, nunca al revés (ver SPEC.md "detección
     determinista").
+
+    Args:
+        events: Lista de eventos del mismo grupo (misma IP atacante).
+
+    Returns:
+        "fuerza_bruta" | "escaneo_puertos" | None (indeterminado).
     """
     dst_ports = []
     for event in events:
@@ -115,6 +160,7 @@ def _parse_ingest_content(content: str) -> list[str]:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    """Ciclo de vida de la aplicación: crea tablas y arranca listener syslog."""
     SQLModel.metadata.create_all(engine)
     transport = await start_syslog_listener(engine, host="0.0.0.0", port=SYSLOG_PORT)
     yield
@@ -126,6 +172,7 @@ app = FastAPI(title="AI-NOC Copilot", version="0.1.0", lifespan=lifespan)
 
 @app.get("/health")
 def health():
+    """Health check simple para monitoreo."""
     return {"status": "ok"}
 
 
@@ -139,7 +186,6 @@ def performance_stats():
 
     from sqlmodel import func, select
 
-    from app.models import LLMTiming
 
     with Session(engine) as session:
         timings = session.exec(select(LLMTiming).order_by(LLMTiming.timestamp.desc()).limit(100)).all()
@@ -225,6 +271,7 @@ def performance_stats():
 
 @app.get("/debug-ollama-config")
 def debug_ollama():
+    """Endpoint de depuración para ver configuración de Ollama en runtime."""
     import os
 
     return {
@@ -356,6 +403,7 @@ def correlation_history(limit: int | None = 50):
 
 @app.get("/events/{event_id}")
 def get_event(event_id: int):
+    """Obtiene un evento por su ID (PK)."""
     with Session(engine) as session:
         event = session.get(NetworkEvent, event_id)
         if not event:
@@ -370,6 +418,7 @@ class IngestRequest(BaseModel):
 
 @app.post("/events/ingest")
 def ingest_events(req: IngestRequest):
+    """Ingesta manual de logs: guarda líneas como eventos sin analizar."""
     lines = _parse_ingest_content(req.content)
     if not lines:
         raise HTTPException(status_code=422, detail="No se encontraron líneas de log en el contenido")
@@ -391,6 +440,7 @@ def ingest_events(req: IngestRequest):
 
 @app.post("/events/{event_id}/analyze")
 async def analyze_event(event_id: int):
+    """Envía un evento al LLM, persiste el resultado y devuelve el evento actualizado."""
     with Session(engine) as session:
         event = session.get(NetworkEvent, event_id)
         if not event:
@@ -421,7 +471,7 @@ class ChatRequest(BaseModel):
 async def chat_with_event(event_id: int, req: ChatRequest):
     """Chat interactivo sobre un evento específico. Streaming puro: cada
     fragmento de la respuesta del LLM se yieldea a medida que Ollama lo
-    genera (ver chat_service.py). No hay estado en el backend -- el
+    genera (ver chat_service.py). No hay estado en el backend: el
     frontend manda el historial completo en cada llamada."""
     with Session(engine) as session:
         event = session.get(NetworkEvent, event_id)
@@ -468,13 +518,13 @@ async def chat_with_event(event_id: int, req: ChatRequest):
     # StreamingResponse compromete el status code inmediatamente; si el
     # generador falla después, el cliente recibe un stream truncado sin
     # código de error. Pequeña latencia extra en el primer chunk vale
-    # el trade-off de poder devolver502 limpio.
+    # el trade-off de poder devolver 502 limpio.
     generator = chat_stream(messages)
     first_chunk = None
     try:
         first_chunk = await generator.__anext__()
     except LLMAnalysisError as exc:
-        logger.error("Chat fallo antes de iniciar stream: %s", exc)
+        logger.error("Chat falló antes de iniciar stream: %s", exc)
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     async def _chain(first: str, rest):
@@ -490,6 +540,8 @@ async def chat_with_event(event_id: int, req: ChatRequest):
 
 @app.post("/events/correlate")
 async def correlate_events(window_minutes: int = 10, threshold: int = CORRELATION_THRESHOLD):
+    """Agrupa eventos no analizados por IP atacante, clasifica patrón de puertos
+    (fuerza bruta / escaneo), asigna correlation_group y envía al LLM."""
     cutoff = datetime.utcnow() - timedelta(minutes=window_minutes)
 
     with Session(engine) as session:
@@ -625,8 +677,8 @@ async def detect_beaconing(window_minutes: int = 60, min_occurrences: int = 5, m
         context = (
             f"Patrón detectado por heurística: {len(group_events)} conexiones salientes "
             f"PERMITIDAS de {src} hacia {dst}:{dport}, con intervalo promedio de "
-            f"{mean_interval:.1f} segundos y una variacion de solo {cv * 100:.1f}% "
-            f"(muy regular -- tipico de un proceso automatizado llamando a un servidor "
+            f"{mean_interval:.1f} segundos y una variación de solo {cv * 100:.1f}% "
+            f"(muy regular -- típico de un proceso automatizado llamando a un servidor "
             f"remoto a intervalos fijos, no de uso humano normal).\n\nEventos:\n{combined_log}"
         )
         try:

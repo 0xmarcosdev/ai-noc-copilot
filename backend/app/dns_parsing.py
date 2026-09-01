@@ -1,6 +1,7 @@
 """
 Extracción de consultas DNS desde logs de pfSense -- soporta los dos
 motores posibles: DNS Resolver (Unbound) y DNS Forwarder (dnsmasq).
+
 Formato verificado con Perplexity contra la documentación oficial de
 Netgate (docs.netgate.com/pfsense/troubleshooting/dns-queries.html) --
 ver docs/ai-sessions/ para la investigación completa.
@@ -30,6 +31,12 @@ def extract_dns_query(raw_message: str) -> dict | None:
     Devuelve {"client_ip": ..., "domain": ..., "qtype": ...} si la línea
     es una consulta DNS reconocible (Unbound o dnsmasq), o None si no lo es
     (ej. es una línea de filterlog o de otro proceso).
+
+    Args:
+        raw_message: Línea completa del log.
+
+    Returns:
+        Dict con client_ip, domain, qtype si coincide, None en caso contrario.
     """
     match = UNBOUND_DNS_RE.search(raw_message)
     if match:
