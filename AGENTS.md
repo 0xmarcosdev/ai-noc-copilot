@@ -30,6 +30,9 @@ cd backend; .\.venv\Scripts\python.exe -m uvicorn app.main:app --reload
 # Tests (venv; NO necesita Ollama, el LLM se mockea)
 cd backend; .\.venv\Scripts\python.exe -m pytest tests -v
 
+# Lint (ruff, config en pyproject.toml)
+cd backend; .\.venv\Scripts\ruff.exe check
+
 # Logs sintéticos (requiere backend corriendo)
 python scripts/generate_fake_logs.py --scenario bruteforce --count 10
 # Escenarios: normal, bruteforce, portscan, beacon, dns_dga, dns_normal, vpn_flapping
@@ -49,9 +52,9 @@ Ollama no es servicio ni está en autorun: verificar con `curl http://localhost:
 
 ## Testing
 
-- Los tests usan un DB temporal en `%TEMP%\ai_noc_test.db`. **El archivo se borra automáticamente al inicio de la sesión de tests** (ver `test_api.py`) -- si aun así ves conteos de grupos inesperados en `correlate`/`beaconing`/`dns`, revisa si algo más está escribiendo a esa ruta antes de sospechar del código.
+- Los tests usan un DB temporal en `%TEMP%\ai_noc_test.db`. **El archivo se borra automáticamente al inicio de la sesión de tests** (ver `test_api.py` líneas 13-20) -- si aun así ves conteos de grupos inesperados en `correlate`/`beaconing`/`dns`, revisa si algo más está escribiendo a esa ruta antes de sospechar del código.
+- **Tests deben correrse desde `backend/`** porque importan `app.main`.
 - Los warnings de `datetime.utcnow()` deprecado son ruido preexistente, no arreglar.
-- Tests corriendo desde `backend/` porque importan `app.main`.
 
 ## Convenciones y archivos raros
 

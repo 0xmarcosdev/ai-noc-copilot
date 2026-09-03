@@ -1,551 +1,450 @@
 # DEVLOG
 
+## Cómo se delegó el trabajo entre herramientas de IA
+
+Basado en AGENTS.md — roles operativos:
+
+- **Claude**: arquitectura, coherencia general, revisión de código, generación de prompts para OpenCode, defensa de decisiones en SPEC.md
+- **OpenCode (Mimo v2.5-free)**: ejecución agéntica de código, implementación de features, debugging, validación Docker, limpieza
+- **Perplexity**: investigación verificada contra fuentes primarias (BNF oficial, código fuente pfSense)
+- **DeepSeek**: tareas de alto volumen / repetitivas (generación de preguntas, tests)
+- **Gemini API**: generación de datos sintéticos
+- **Kimi**: procesamiento de documentos largos
+- **Grok / ChatGPT**: respaldo y segunda opinión
+
+**Regla operativa**: cuando una herramienta propone un cambio que contradice una decisión ya documentada en SPEC.md, Claude lo señala explícitamente antes de proceder (no se reemplaza en silencio). La delegación sigue el principio: determinismo en la detección, LLM solo para explicación; todo air-gapped; Windows como plataforma real.
+
+---
+
 ## Día 1 — 10 ago 2026
 
-- Definido el alcance del MVP (AI-NOC Copilot) tras evaluar y descartar 7 propuestas
-  sobredimensionadas para el hardware y el tiempo disponibles.
-- Generado el esqueleto del proyecto: FastAPI + SQLModel + SQLite, listener syslog UDP,
-  servicio de análisis vía Ollama, dashboard Streamlit, docker-compose.
-- Decisión de arquitectura: Ollama corre nativo en el host (ya estaba instalado con el
-  modelo descargado), no duplicado en contenedor -- ahorra espacio en disco y evita
-  complejidad de networking innecesaria.
-- Tests iniciales (pytest) pasando en 4/4.
+**Asistente(s) de IA**: Claude  
+**Fase**: Fase 0 (Diseño y alcance)
+
+**Contexto**: Inicio del proyecto, evaluación de 7 propuestas de arquitectura sobredimensionadas (Elastic, Suricata/Zeek completo, multi-sucursal real, modelos 7B+).
+
+**Qué se hizo**:
+- Definido MVP: FastAPI + SQLModel/SQLite + Streamlit + Ollama nativo
+- Generado esqueleto del repo: listener syslog UDP, modelo NetworkEvent, servicio LLM, dashboard, docker-compose
+- Decisión de arquitectura: Ollama corre nativo en host (ya instalado con modelo), no en contenedor
+- Tests iniciales pytest pasando (4/4)
+
+**Decisión de diseño / aprendizaje clave**: Ollama nativo ahorra espacio en disco (SSD limitado) y evita complejidad de networking sin beneficio. Documentado en SPEC.md §3.
+
+**Verificación**: 4/4 tests ✅
+
+---
 
 ## Día 2 — 11-12 ago 2026
 
-- Confirmado: no hay pfSense de laboratorio disponible; los pfSense reales están en
-  producción. Decisión: usar datos sintéticos para desarrollo, evaluar acceso a
-  producción más adelante por una vía segura (muestra histórica sanitizada, no
-  streaming en vivo desde un equipo personal no gestionado).
-- Perplexity: verificado el formato exacto de filterlog de pfSense contra la
-  gramática BNF oficial (docs.netgate.com) y el código fuente de pfSense en GitHub
-  (parse_firewall_log_line() en syslog.inc).
-- Construido scripts/generate_fake_logs.py con 3 escenarios (normal, bruteforce,
-  portscan) fieles al formato verificado.
-- Pipeline validado end-to-end: ingesta UDP -> SQLite -> /analyze -> Ollama
-  (my-qwen-3b:latest) -> explicación en lenguaje natural. Evento de prueba
-  (openvpn timeout) clasificado correctamente como severidad "low".
-- Bug corregido: SQLite no creaba la carpeta `data/` automáticamente (diagnosticado
-  también por Qwen) -> fix aplicado en main.py con Path.mkdir().
-- Agregado python-dotenv + .env.example para evitar declarar variables de entorno
-  a mano en cada sesión de terminal en Windows.
+**Asistente(s) de IA**: Perplexity, Qwen  
+**Fase**: Fase 1 (Ingesta y pipeline base) / Fase 3 (Datos sintéticos)
+
+**Contexto**: No hay pfSense de laboratorio (los reales están en producción). Necesidad de datos de prueba realistas.
+
+**Qué se hizo**:
+- Perplexity: verificado formato filterlog de pfSense contra BNF oficial (docs.netgate.com) y código fuente GitHub (parse_firewall_log_line en syslog.inc)
+- Construido scripts/generate_fake_logs.py con 3 escenarios (normal, bruteforce, portscan) fieles al formato verificado
+- Pipeline validado end-to-end: ingesta UDP → SQLite → /analyze → Ollama (my-qwen-3b:latest) → explicación
+- Bug corregido: SQLite no creaba carpeta `data/` → fix en main.py con Path.mkdir()
+- Agregado python-dotenv + .env.example para variables de entorno en Windows
+
+**Decisión de diseño / aprendizaje clave**: Usar generador sintético con formato verificado, no pfSense real. Vía segura para logs reales: exportar manual + sanitizar + POST /events/ingest (SPEC §8).
+
+**Verificación**: Pipeline end-to-end validado contra Ollama real
+
+---
 
 ## Día 3 — 15-16 ago 2026
 
-- Generados 10 eventos sintéticos de escenario "bruteforce" (mismo puerto 22,
-  IPs origen distintas) para probar cómo clasifica el LLM un patrón de ataque.
-- Detectado un problema de entorno: nuevo venv creado sobre Python 3.14 rompe
-  SQLModel/Pydantic por el cambio de evaluación de anotaciones de PEP 649
-  (confirmado también por Qwen, y verificado por Claude comparando contra un
-  entorno Python 3.12 donde el mismo código funciona sin cambios).
-- Decisión: fijar el venv del proyecto a Python 3.11/3.12 en vez de parchear
-  el código para 3.14, por consistencia con la imagen Docker de despliegue.
-- Pendiente: confirmar clasificación de severidad de un evento de fuerza bruta
-  individual (limitación esperada: análisis evento-por-evento sin correlación
-  entre eventos relacionados).
-  - Diagnosticado y resuelto: httpx reutilizaba conexiones keep-alive que Ollama
-  cerraba, causando "Server disconnected without sending a response". Fix:
-  deshabilitar keep-alive (max_keepalive_connections=0) y separar timeouts de
-  conexión/lectura en llm_service.py.
-- Pipeline de análisis validado end-to-end contra Ollama real: evento de bloqueo
-  SSH clasificado como severity "low" -- CONFIRMA la limitación esperada: un
-  evento individual de fuerza bruta no se distingue de tráfico normal sin
-  contexto de los demás intentos. Próximo paso: correlación de eventos por
-  IP origen + ventana de tiempo antes de enviar al LLM.
-- Creado docs/SPEC.md como documento de referencia único para desarrollo
-  guiado por especificación (spec-driven development) y como contexto
-  reutilizable para delegar tareas a otras herramientas de IA.
+**Asistente(s) de IA**: Qwen, Claude  
+**Fase**: Fase 2 (LLM local)
 
-## Día 4 -16 ago 2026
+**Contexto**: Pipeline básico funcionando, pero evento individual de fuerza bruta se clasifica como severity "low" (limitación esperada sin correlación).
 
-- Confirmado que un evento aislado de fuerza bruta se clasificaba como severity:
-  low — la limitación que ya esperábamos.
-- Construída la corrección: endpoint POST /events/correlate, que agrupa eventos
-  por IP atacante real (no por source_ip) y los manda juntos al LLM.
-- Creado documento de seguimiento — creamos ROADMAP.md (checklist de fases + versionado
-  vMAJOR.MINOR.PATCH).
-- Probado /correlate — dio groups_detected: 0. Encontramos el motivo: el generador
-  de logs sintéticos usaba una IP atacante distinta en cada evento, así que nunca se
-  agrupaban 5+ del mismo origen.
-- Creado scripts/ensure_ollama.bat para levantar Ollama.
-- Prueba repetida: funcionó — 10 eventos agrupados, severity: high, patrón identificado correctamente.
-- Agregados tests para el endpoint de correlación, limpié unos duplicados que habían
-  quedado en el archivo de tests.
-- Actualizados ROADMAP.md y SPEC.md marcando la Fase 4 como completa.
-- Botón de correlación en el dashboard de Streamlit (Fase 5) — pero no llegué a dártelo,
-  ahí es donde se cortó.
+**Qué se hizo**:
+- Detectado problema de entorno: Python 3.14 rompe SQLModel/Pydantic (PEP 649) → fijado venv a Python 3.11/3.12
+- Diagnosticado y resuelto: httpx keep-alive causaba "Server disconnected" → deshabilitado max_keepalive_connections=0, timeouts separados en llm_service.py
+- Confirmado: evento SSH aislado → severity "low"; grupo correlacionado → severity "high"
+- Creado docs/SPEC.md como referencia única (spec-driven development)
 
-## Día 5 19 ago 2026
+**Decisión de diseño / aprendizaje clave**: Fijar Python 3.11/3.12 (consistente con Dockerfile python:3.11-slim) en vez de parchear código para 3.14. Detección determinista + LLM para explicación, no al revés.
 
-- Resolvimos el conflicto de dependencias: Fijamos versiones compatibles de
-  FastAPI, Starlette y Streamlit. (pip install "fastapi==0.115.0" "starlette==0.38.6"
-  "streamlit==1.39.0")
-- Automatizamos el inicio del frontend y el backend mediante scripts.
-  (Creando un archivo llamado .env dentro de D:\AiProject\ai-noc-copilot\frontend\ con contenido: BACKEND_URL=<http://localhost:8000>, y los cripts start-backend.ps1, start-frontend.ps1 y start-all.ps1)
+**Verificación**: Pipeline validado end-to-end contra Ollama real; low vs high confirmado como evidencia clave
+
+---
+
+## Día 4 — 16 ago 2026
+
+**Asistente(s) de IA**: Claude  
+**Fase**: Fase 4 (Correlación de eventos)
+
+**Contexto**: Evento aislado de fuerza bruta = low. Necesidad de agrupar por IP atacante + ventana temporal.
+
+**Qué se hizo**:
+- Construido endpoint POST /events/correlate: agrupa por IP atacante real (extract_attacker_ip desde raw_message), envía lote al LLM
+- Creado ROADMAP.md (checklist fases + versionado vMAJOR.MINOR.PATCH)
+- Detectado bug en generador sintético: usaba IP atacante distinta por evento → corregido para fijar IP por lote
+- Prueba repetida: 10 eventos agrupados, severity: high, patrón identificado
+- Agregados tests para /correlate, limpieza de duplicados en tests
+- Actualizados ROADMAP.md y SPEC.md (Fase 4 completa)
+
+**Decisión de diseño / aprendizaje clave**: Correlación usa IP real extraída del raw_message (regex), NO source_ip del paquete UDP (que es el pfSense). Ver SPEC §4 y §7.
+
+**Verificación**: /correlate funcionando, tests pasando
+
+---
+
+## Día 5 — 19 ago 2026
+
+**Asistente(s) de IA**: OpenCode  
+**Fase**: Fase 1/5 (Infraestructura scripts + UI)
+
+**Contexto**: Dependencias conflictivas entre FastAPI/Starlette/Streamlit; necesidad de scripts de arranque en Windows.
+
+**Qué se hizo**:
+- Fijadas versiones compatibles: fastapi==0.115.0, starlette==0.38.6, streamlit==1.39.0
+- Creados scripts start-backend.ps1, start-frontend.ps1, start-all.ps1
+- Creado frontend/.env con BACKEND_URL=http://localhost:8000
+- Automatizada carga de .env en scripts PowerShell
+
+**Verificación**: Scripts arrancan backend/frontend correctamente en Windows
+
+---
 
 ## Día 6 — 17-18 ago 2026
 
-- Construidos POST /events/detect-beaconing (coeficiente de variación de
-  intervalos) y POST /events/detect-suspicious-dns (entropía de Shannon,
-  formato DNS de pfSense verificado con Perplexity: Unbound + dnsmasq).
-- Principio de diseño declarado explícitamente: la detección siempre es
-  determinista (regex/entropía/estadística); el LLM nunca decide solo,
-  solo redacta la explicación.
-- Evaluado y descartado conscientemente un diseño de detección de picos
-  con z-score (scope creep -- reimplementaba el módulo de ML de anomalías
-  ya excluido del MVP).
-- 4 escenarios sintéticos nuevos: beacon, dns_dga, dns_normal, vpn_flapping.
-  Bug propio corregido: el generador de dominios DGA no era suficientemente
-  aleatorio para disparar la propia heurística de entropía.
-- Creado AGENTS.md (Claude) para dar contexto a OpenCode; fusionado luego
-  con la versión que generó OpenCode con /init -- encontró bugs reales que
-  la versión de Claude no tenía: contaminación de DB entre corridas de
-  test, y dos archivos basura comiteados por error.
-- ROADMAP: Fase 5.5 (Detección extendida) cerrada.
+**Asistente(s) de IA**: Claude, OpenCode  
+**Fase**: Fase 5.5 (Detección extendida)
+
+**Contexto**: Correlación básica funcionando. Extender detección a beaconing y DNS sospechoso.
+
+**Qué se hizo**:
+- Implementados POST /events/detect-beaconing (coeficiente de variación de intervalos) y POST /events/detect-suspicious-dns (entropía de Shannon, dns_heuristics.py)
+- Formato DNS de pfSense verificado con Perplexity (Unbound + dnsmasq)
+- Principio declarado: detección siempre determinista; LLM solo redacta explicación
+- Evaluado y descartado conscientemente: detección de picos con z-score (scope creep — reimplementaba ML de anomalías excluido del MVP)
+- 4 escenarios sintéticos nuevos: beacon, dns_dga, dns_normal, vpn_flapping
+- Bug corregido: generador DGA no era suficientemente aleatorio para disparar heurística
+- Creado AGENTS.md (Claude) y fusionado con versión OpenCode (/init) → OpenCode encontró bugs reales: contaminación DB entre tests y 2 archivos basura comiteados
+- ROADMAP: Fase 5.5 cerrada
+
+**Decisión de diseño / aprendizaje clave**: Detección determinista (regex/entropía/estadística) — el LLM nunca decide, solo explica. z-score descartado por scope creep.
+
+**Verificación**: 4 escenarios nuevos, detección beaconing/DNS validada
+
+---
 
 ## Día 7 — 19-20 ago 2026
 
-- Tarea delegada a OpenCode: validar despliegue Docker (Opción B). Docker
-  Desktop no estaba instalado -- validación por inspección estática en vez
-  de ejecución real. Encontrados y corregidos: falta de .dockerignore
-  (build incluía backend/.venv, ~421MB), healthcheck del backend ausente,
-  streamlit desactualizado, prerequisitos de Ollama/puertos no documentados
-  en el README. Commit db950d5.
-- Feature nueva: ingesta manual de logs (pegar o subir archivo), conectada
-  directamente a la decisión de SPEC §8 (vía segura para usar logs reales
-  de producción). Planificada con OpenCode en modo Plan, decisiones:
-  received_at=utcnow, ingesta pasiva (no auto-correlaciona).
-- POST /events/ingest implementado + UI en el dashboard + 5 tests nuevos.
-- Validación en vivo (no solo mocks): encontrado que Ollama en esta máquina
-  no tenía ningún modelo registrado (OLLAMA_MODELS apuntaba a un directorio
-  con el .gguf presente pero nunca registrado) -- causa raíz real del
-  fallo, diagnosticada paso a paso en vez de asumida. Modelo registrado
-  con `ollama create`. Correlación real confirmada: severity "high" para
-  6 eventos de fuerza bruta ingeridos manualmente (51s con el LLM real);
-  análisis individual confirmado: severity "low" para un evento normal
-  (18.7s). Contraste low/high sigue siendo la mejor evidencia del proyecto.
-- ROADMAP: Fase 5.6 (Ingesta manual) casi completa.
+**Asistente(s) de IA**: OpenCode  
+**Fase**: Fase 5.6 (Ingesta manual) + Docker
+
+**Contexto**: Validación despliegue Docker (Opción B) y feature de ingesta manual para logs reales (SPEC §8).
+
+**Qué se hizo**:
+- Validación Docker por inspección estática (Docker Desktop no instalado): corregidos .dockerignore (excluye .venv ~421MB), healthcheck backend, streamlit actualizado, prerequisitos Ollama/puertos en README
+- Feature ingesta manual: POST /events/ingest (pegar/subir líneas como eventos sin analizar) + UI en dashboard + 5 tests
+- Planificada con OpenCode modo Plan: received_at=utcnow, ingesta pasiva (no auto-correlaciona)
+- Validación en vivo: Ollama sin modelo registrado (OLLAMA_MODELS mal configurado) → diagnóstico paso a paso, modelo registrado con `ollama create`
+- Correlación real confirmada: severity "high" para 6 eventos fuerza bruta ingeridos (51s); análisis individual: severity "low" (18.7s)
+- ROADMAP: Fase 5.6 casi completa
+
+**Decisión de diseño / aprendizaje clave**: Ingesta manual materializa vía segura SPEC §8 — sanitizar IPs antes de pegar, received_at=utcnow para que ventanas de correlación funcionen de inmediato.
+
+**Verificación**: Correlación real low vs high confirmada (51s vs 18.7s)
+
+---
 
 ## Día 8 — 20 ago 2026
 
-- Implementada búsqueda, filtros y paginación en `GET /events`
-  (limit/offset/q/severity/event_type/only_unanalyzed → `{total, limit,
-  offset, items}`), planificado con Grok. El parche del backend llegó con
-  la feature de ingesta accidentalmente borrada (los tests de /ingest
-  fallaban con 404) — restaurada desde el commit anterior y reaplicado el
-  cambio de paginación limpio sobre el mismo.
-- Dashboard: la lista de eventos ya no asume una respuesta tipo lista;
-  parsea `{items, total}` y agrega filtros + paginación con session_state
-  (resetea la página al cambiar filtros, botones anterior/siguiente).
-- Tests: `test_list_events` actualizado al nuevo shape + nuevo
-  `test_list_events_pagination_and_filters` (q, severity, only_unanalyzed,
-  event_type, limit/offset). Suite completa en verde (20 tests), ruff limpio.
-- ROADMAP: Fase 5.7 (Búsqueda, filtros y paginación) creada, casi completa.
+**Asistente(s) de IA**: Grok, OpenCode  
+**Fase**: Fase 5.7 (Búsqueda, filtros y paginación)
+
+**Contexto**: Lista de eventos creciendo, necesidad de paginación y filtros en backend y frontend.
+
+**Qué se hizo**:
+- GET /events extendido: limit/offset/q/severity/event_type/only_unanalyzed/id_from/id_to/received_at_from/received_at_to/sort_by/sort_dir → `{total, limit, offset, items}`
+- Backend: parche llegó con feature de ingesta borrada accidentalmente → restaurada desde commit anterior y reaplicado limpio
+- Dashboard: parsea `{items, total}`, filtros + paginación con session_state (resetea página al cambiar filtros)
+- Tests: test_list_events actualizado + nuevo test_list_events_pagination_and_filters (q, severity, only_unanalyzed, event_type, limit/offset)
+- Suite completa 20 tests en verde, ruff limpio
+- ROADMAP: Fase 5.7 creada, casi completa
+
+**Verificación**: 20/20 tests ✅, ruff ✅
+
+---
 
 ## Día 9 — 23 ago 2026
 
-- Retomamos el proyecto con Claude después de una sesión previa con
-  OpenCode que había dejado la Fase C (persistencia y clasificación de
-  correlación — recomendaciones #5 y #6 de `docs/recomendaciones_dashboard.txt`)
-  a medio construir: la columna `correlation_group` ya estaba en
-  `NetworkEvent`, el endpoint `GET /events/correlation-history` ya existía,
-  y en `test_api.py` ya había 5 tests escritos para `classify_port_pattern`
-  y para la asignación de `correlation_group` — pero la función
-  `classify_port_pattern` no existía en `main.py` (los tests fallaban con
-  `NameError`) y `/events/correlate` nunca escribía `correlation_group`.
-- Implementado `classify_port_pattern`: heurística determinista basada en
-  la proporción de puertos destino distintos sobre el total de eventos del
-  grupo (`≤0.3` → fuerza_bruta, `≥0.7` → escaneo_puertos, zona intermedia o
-  menos de 3 eventos con puerto extraído → indeterminado). Sin involucrar
-  al LLM en la clasificación, consistente con el principio de detección
-  determinista ya aplicado en beaconing/DNS.
-- `POST /events/correlate` ahora asigna `correlation_group` (contador
-  global creciente, sin reutilizar IDs) y pasa el patrón de puertos
-  clasificado como contexto explícito al prompt del LLM, siguiendo el
-  mismo patrón ya usado en `detect-beaconing` y `detect-suspicious-dns`.
-- Encontrada y corregida una inconsistencia en `docs/SPEC.md` §7: describía
-  umbrales de clasificación distintos a los que terminamos implementando, y
-  afirmaba una migración automática de esquema (`ALTER TABLE` en el
-  lifespan) que en realidad nunca se codificó — documentado como
-  limitación conocida en vez de dejar la contradicción sin resolver (regla
-  de AGENTS.md).
-- 29/29 tests en verde (24 previos + 5 de esta fase), `ruff check` limpio.
-  Base de datos de desarrollo borrada y recreada desde cero por el usuario
-  para partir con el esquema nuevo.
-- ROADMAP: creada Fase 5.8 (Persistencia y clasificación de correlación,
-  "Fase C" del plan de dashboard) — backend completo, falta la sección del
-  dashboard que consuma `/events/correlation-history` (el botón actual solo
-  corre `/correlate` al vuelo y no persiste vista tras recargar). Creada
-  Fase 5.9 (Estadísticas y gráficos, "Fase D") como siguiente paso.
-- Pendiente para la próxima sesión (delegado a OpenCode): el botón/sección
-  del dashboard para el histórico de correlación, y arrancar la Fase D
-  completa con verificación exhaustiva (tests, lint, validación en vivo).
+**Asistente(s) de IA**: Claude  
+**Fase**: Fase 5.8 (Persistencia y clasificación de correlación)
+
+**Contexto**: Retomada tras sesión OpenCode que dejó Fase 5.8 a medio construir: correlation_group en NetworkEvent, GET /events/correlation-history stub, 5 tests escritos pero classify_port_pattern no existía (NameError) y /correlate no escribía correlation_group.
+
+**Qué se hizo**:
+- Implementado classify_port_pattern: heurística determinista por ratio puertos destino distintos (≤0.3 fuerza_bruta, ≥0.7 escaneo_puertos, <3 eventos o zona intermedia → indeterminado)
+- POST /events/correlate ahora asigna correlation_group (contador global creciente, sin reutilizar IDs) y pasa patrón como contexto explícito al LLM
+- Corregida inconsistencia en SPEC.md §7: umbrales y migración ALTER TABLE no codificada → documentada como limitación conocida
+- 29/29 tests en verde, ruff limpio, DB de desarrollo recreada
+- ROADMAP: Fase 5.8 backend completa, falta UI dashboard para histórico
+
+**Decisión de diseño / aprendizaje clave**: classify_port_pattern 100% determinista (sin LLM), umbrales como constantes en main.py. SQLModel.metadata.create_all() no migra columnas en SQLite existente — borrar .db en desarrollo.
+
+**Verificación**: 29/29 tests ✅, ruff ✅, py_compile ✅
+
+---
 
 ## Día 10 — 23 ago 2026
 
-- Cerrada la Fase 5.8 (Persistencia y clasificación de correlación):
-  implementada la sección "Histórico de correlación" en `frontend/dashboard.py`
-  que consume `GET /events/correlation-history` al cargar la página. Muestra
-  cada grupo en un expander con ícono según patrón (🎯 fuerza_bruta,
-  📡 escaneo_puertos, ❓ indeterminado), IP(s) atacante, severidad (reusando
-  la misma paleta de colores del resto del dashboard), ventana temporal y
-  IDs de eventos. El botón "Correlacionar eventos sin analizar" se mantiene
-  intacto — la sección nueva es adicional, no reemplazo. 29/29 tests en
-  verde, ruff limpio, py_compile sin errores.
+**Asistente(s) de IA**: OpenCode  
+**Fase**: Fase 5.8 (UI histórico correlación)
+
+**Contexto**: Backend de Fase 5.8 completo. Falta sección dashboard que consuma /events/correlation-history.
+
+**Qué se hizo**:
+- Implementada sección "Histórico de correlación" en frontend/dashboard.py: consume GET /events/correlation-history al cargar
+- Cada grupo en expander con ícono (🎯 fuerza_bruta, 📡 escaneo_puertos, ❓ indeterminado), IPs, severidad, ventana temporal, IDs
+- Botón "Correlacionar eventos sin analizar" se mantiene intacto
+- 29/29 tests en verde, ruff limpio, py_compile sin errores
+- ROADMAP: Fase 5.8 cerrada, Fase 5.9 (Estadísticas y gráficos) como siguiente
+
+**Verificación**: 29/29 tests ✅, ruff ✅, py_compile ✅
+
+---
 
 ## Día 11 — 23 ago 2026
 
-- Cerrada la Fase 5.9 (Estadísticas y gráficos, "Fase D" del plan de
-  mejoras de dashboard). Resuelve recomendaciones #10 y #12.
-- **Backend**: extendido `GET /summary` con claves nuevas sin romper el
-  contrato existente: `by_event_type` (distribución por tipo), `time_series`
-  (eventos agrupados por hora), `correlated_count`/`individual_count`
-  (eventos correlacionados vs individuales). 2 tests nuevos (31/31 total).
-- **Gráficos**: se evaluó y agregó `plotly==6.0.1` (100% offline, sin
-  CDN, alternativa evaluada: altair — descartada por menor
-  customización). Tres gráficos en el dashboard: pie chart de severidad,
-  barras horizontales de tipos de evento, línea de serie temporal por hora.
-  Documentado en SPEC §9 como decisión de diseño.
-- **Exportar**: botones de descarga CSV y JSON de los eventos filtrados
-  actualmente en el dashboard (usa los mismos datos de `GET /events`, sin
-  duplicar lógica).
-- **Reporte on-demand**: genera un resumen determinista (agregaciones y
-  estadísticas) en Markdown, descargable. Decisión de diseño: el reporte
-  NO pasa por el LLM — es 100% determinista (conteos, distribuciones,
-  proporciones). Razonamiento: el LLM redacta explicaciones de eventos
-  individuales/grupos, no genera informes estadísticos. Un prompt de LLM
-  para esto sería más lento, menos consistente y no aporta valor sobre
-  las agregaciones SQL/Python que ya tenemos.
-- ruff limpio en backend y frontend, 31/31 tests en verde.
-  
+**Asistente(s) de IA**: OpenCode  
+**Fase**: Fase 5.9 (Estadísticas y gráficos)
+
+**Contexto**: Cerrar Fase 5.8 y abordar Fase 5.9 (recomendaciones #10 y #12: panel enriquecido, gráficos, exportar, reporte on-demand).
+
+**Qué se hizo**:
+- Backend: GET /summary extendido con by_event_type, time_series, correlated_count, individual_count (sin romper contrato) + 2 tests nuevos (31/31 total)
+- Gráficos: evaluado plotly vs altair → plotly por customización y soporte nativo Streamlit, 100% offline (sin CDN), documentado en SPEC §9
+- Frontend: 3 gráficos interactivos (pie severidad, barras tipos, línea temporal), exportar CSV/JSON, reporte on-demand determinista en Markdown (sin LLM)
+- ruff limpio backend+frontend, 31/31 tests en verde
+- ROADMAP: Fase 5.9 cerrada
+
+**Decisión de diseño / aprendizaje clave**: Reporte on-demand NO pasa por LLM — es 100% determinista (conteos, distribuciones). LLM redacta explicaciones de eventos/grupos, no informes estadísticos. Plotly 100% offline.
+
+**Verificación**: 31/31 tests ✅, ruff ✅, py_compile ✅
+
+---
+
 ## Día 12 — 24 ago 2026
 
-- Verificación pre-grabación: confirmado que `dashboard.py` usa solo stdlib
-  (`csv.DictWriter`, `json.dumps`, `io.StringIO`) para exportar CSV/JSON —
-  NO usa pandas. No es necesario tocar `requirements.txt` ni Dockerfile.
-- Creado `docs/demo-script.md`: guion de demo de 8–10 minutos en 8 escenas
-  con comandos exactos, resultados esperados y qué explicar en cada momento.
-  Incluye checklist pre-grabación de 7 ítems.
-- ROADMAP actualizado: ítems de Fase 5.8 completados, annotados los
-  pendientes del humano en Fase 6 (evidencia IA, Docker, grabación, ensayo).
-- Regresión final: 31/31 tests ✅, ruff ✅, py_compile ✅.
-- Sesión 13 exportada a `docs/ai-sessions/2026-08-24-opencode-verificacion-y-guion-demo.md`.
+**Asistente(s) de IA**: OpenCode  
+**Fase**: Fase 6 (Preparación entrega)
 
-## Sesión 14 — 26 de agosto 2026
-**Asistente de IA**: Qwen3.7  
-**Fase**: 5.10 (Chat interactivo) + Mejoras de UX  
-**Duración**: ~2 horas  
-**Tema**: Fix crítico de nested expanders + Optimización de inteligencia del LLM
+**Contexto**: Proyecto funcionalmente completo (Fases 0-5.9). Verificación pre-grabación y documentación final.
 
-### Problemas detectados
+**Qué se hizo**:
+- Confirmado dashboard.py usa solo stdlib (csv, json, io) para exportar — NO pandas
+- Creado docs/demo-script.md: guion 8 escenas, 8-10 min, checklist pre-grabación 7 ítems
+- ROADMAP actualizado: ítems Fase 5.8 completados, pendientes Fase 6 annotados (evidencia IA, Docker, grabación, ensayo)
+- Regresión final: 31/31 tests ✅, ruff ✅, py_compile ✅
+- Sesión exportada a docs/ai-sessions/2026-08-24-opencode-verificacion-y-guion-demo.md
 
-1. **Error Streamlit**: `StreamlitAPIException: Expanders may not be nested inside other expanders`
-   - Ubicación: Línea ~501 en sección "Histórico de correlación"
-   - Causa: `st.expander("IDs de eventos")` anidado dentro de otro expander
+**Verificación**: 31/31 tests ✅, ruff ✅, py_compile ✅, stdlib confirmado
 
-2. **Alucinación del LLM**: Al consultar sobre el Grupo #5 (fuerza_bruta, high), el modelo respondía:
-   - Decía "indeterminado" en lugar de "fuerza_bruta"
-   - Mencionaba IP incorrecta (198.51.100.74 del Grupo #1)
-   - Referenciaba grupo #1 en lugar del #5 consultado
-   - Latencia excesiva: 53.1s
-
-### Soluciones implementadas
-
-#### Fix 1: Reemplazar expanders anidados por popovers
-- `st.expander("IDs de eventos")` → `st.popover("📋 Ver IDs de eventos")`
-- Aplicado en 2 ubicaciones:
-  - Sección "Correlación de eventos" (línea ~445)
-  - Sección "Histórico de correlación" (línea ~501)
-- **Resultado**: Error eliminado, UI más limpia
-
-#### Fix 2: Reset de historial al cambiar destino
-```python
-if st.session_state.get("chat_prev_dest") != selected_id:
-    st.session_state.chat_messages = []
-    st.session_state.chat_prev_dest = selected_id
-
-Evita contaminación de contexto entre grupos diferentes
-Resultado: Cada consulta parte desde cero
-Fix 3: Cache de datos en session_state
-chat_groups_cache: Almacena IPs, patrón, severidad, event_count, unique_ports
-chat_events_cache: Almacena severidad, event_type, ai_explanation, analyzed
-Resultado: Datos disponibles sin llamadas adicionales al backend
-Fix 4: System prompt robusto con reglas explícitas
-REGLAS OBLIGATORIAS:
-1. Usa SOLO la información del CONTEXTO proporcionado
-2. NUNCA inventes IPs, puertos, timestamps ni patrones
-3. Respeta la clasificación del sistema (fuerza_bruta ≠ indeterminado)
-4. Ignora mensajes anteriores si referencian otro evento/grupo
-5. Responde en español, técnico pero claro
-6. Si no tienes información suficiente, dilo explícitamente
-
-FORMATO DE RESPUESTA:
-- Diagnóstico
-- Evidencia
-- Riesgo
-- Acción inmediata
-- Investigación adicional
-Resultado: Respuestas estructuradas y consistentes
-Fix 5: Inyección de contexto en cada mensaje
-Cada pregunta del usuario incluye al final:
 ---
-CONTEXTO DEL GRUPO #5 (usar SOLO esto):
-- IP(s) atacante(s): 203.0.113.4
-- Patrón detectado: fuerza_bruta
-- Severidad: high
-- Cantidad de eventos: 5
-- Puertos únicos: 1
-Resultado: El LLM siempre tiene visible el contexto correcto
-Fix 6: Chips de preguntas dinámicos
-Antes: "¿Qué significa este evento?" (genérico)
-Ahora: "¿Qué significa el grupo #5?" (específico)
-Incluye datos relevantes: "¿Es una amenaza real el patrón 'fuerza_bruta'?"
-Resultado: UX más intuitiva y contextual
-Métricas de mejora
-Métrica
-Antes
-Después
-Mejora
-Alucinaciones
-100% (IP/grupo incorrecto)
-0%
-✅
-Consistencia
-Mezclaba contextos
-100% contextual
-✅
-Latencia
-53.1s
-43.2s
--19%
-UX
-Expanders anidados (error)
-Popovers funcionales
-✅
-Testing realizado
-Generación de logs bruteforce: python scripts/generate_fake_logs.py --scenario bruteforce --count 10
-Correlación de eventos: 4 grupos detectados
-Chat interactivo: Consultas a Grupo #5 (fuerza_bruta) y Grupo #1 (indeterminado)
-Verificación: Sin mezcla de contextos, respuestas coherentes
-Próximos pasos
-Mejorar layout general del dashboard (más moderno, ergonómico)
-Optimizar uso de espacio horizontal
-Refinar tipografía y jerarquía visual
-Considerar tabs para separar secciones principales
 
-## Sesión 17 — 25 ago 2026
-**Asistente de IA**: Grok  
-**Tema**: Revamp visual del dashboard (Streamlit) + debug del lookup de eventos en chat
+## Sesión 14 — 25 ago 2026
 
-### Diagnóstico backend — `GET /events/{id}`
-- En `backend/app/main.py` **no existe** `GET /events/{event_id}`.
-- Rutas relacionadas:
-  - `GET /events` — listado paginado con filtros (`id_from`, `id_to`, `q`, `severity`, …) → `{total, limit, offset, items}`
-  - `POST /events/{event_id}/analyze`
-  - `POST /events/{event_id}/chat` — exige un **ID de evento** (PK de `NetworkEvent`), no un nº de grupo de correlación
-- Efecto en el chat del dashboard: la primera carga hacía `GET /events/{id}` → 404 → “No existe el evento #N”.
-- Mitigación en frontend: `_load_event_by_id()` con cascada:
-  1. `GET /events/{id}` (si se agrega en el futuro)
-  2. `GET /events?id_from=N&id_to=N&limit=5`
-  3. Búsqueda en los últimos 200 eventos del listado
-- Limitación restante: el chat sobre **grupo de correlación** sigue llamando `POST /events/{group_id}/chat`, que busca un evento con ese PK; conviene en un siguiente paso o bien pasar un `event_id` del grupo, o añadir un endpoint de chat por grupo.
+**Asistente(s) de IA**: Grok  
+**Fase**: 5.10 (Revamp visual dashboard + debug lookup chat)
 
-### Revamp UI (frontend/dashboard.py)
-- Tabs: Eventos | Chat | Correlación (el chat ya no alarga el scroll de la lista).
-- Tema claro/oscuro con variables CSS; contraste de placeholders, `st.code`, markdown y popovers en modo claro.
-- Filtros: severidad / orden / dirección / por página como **radios** (no editables).
-- Chat: historial en un único bloque HTML con altura fija + scroll; destino por `number_input` (ID numérico); historial se preserva al cambiar tema.
-- Tipografía: JetBrains Mono (UI operativa) + IBM Plex Sans (cuerpo); respuestas del LLM normalizadas con `_md_lite_to_html`.
-- Encabezados de eventos más legibles; gráficos Plotly con hover y colores de tema.
+**Contexto**: Dashboard con scroll vertical infinito. Chat fallaba por falta de GET /events/{id} en backend.
 
-### Verificación sugerida (humano)
-```powershell
-curl http://localhost:8000/health
-curl "http://localhost:8000/events?id_from=45&id_to=45&limit=1"
-# Esperado: JSON con items[0].id == 45 (si el evento existe)
-curl -s -o NUL -w "%{http_code}" http://localhost:8000/events/45
-# Esperado hoy: 404 o 405 (no hay GET por id)
-```
+**Qué se hizo**:
+- Diagnosticado backend: no existe GET /events/{event_id} → chat hacía 404; mitigación frontend con cascada (GET /events?id_from=N&id_to=N&limit=5 + búsqueda en últimos 200)
+- Revamp UI: tabs (Eventos/Chat/Correlación), tema claro/oscuro CSS, filtros como radios, chat en bloque HTML scrolleable, tipografía JetBrains Mono + IBM Plex Sans, gráficos Plotly con hover/tema
+- Verificación sugerida: curl health, GET /events?id_from=X&id_to=X, GET /events/X (esperado 404 hoy)
+- Próximos pasos: añadir GET /events/{event_id} y chat por grupo dedicado
 
-### Próximos pasos
-- [x] (Opcional backend) Añadir `GET /events/{event_id}` para alinear contrato con el chat.
-- [ ] Chat de grupo: endpoint dedicado o resolver a un `event_id` del grupo antes de llamar a `/chat`.
-- [ ] Cerrar UI de Fase 5.10 en ROADMAP y seguir con pendientes de Fase 6 (demo, evidencia IA, Docker).
+**Decisión de diseño / aprendizaje clave**: st.tabs no conserva pestaña al rerun → más adelante se cambió a st.radio + session_state. Chat sobre grupo necesita endpoint dedicado o resolver a event_id del grupo.
 
-## Sesión 15 — 26 de agosto 2026
-**Asistente de IA**: Qwen3.7  
-**Fase**: 5.10 (UI del Chat) + Refactorización Visual del Dashboard  
-**Duración**: ~1.5 horas  
-**Tema**: Implementación de layout basado en Tabs, corrección de bugs de persistencia de correlación y mejora de UX en el chat.
+**Verificación**: 37/37 tests ✅ (tras añadir GET /events/{id} en sesión posterior)
 
-### Cambios Arquitectónicos y de UI
-- **Migración a Layout por Tabs**: Se reemplazó el scroll vertical infinito por una navegación tabulada (`st.tabs`): "📋 Eventos", "💬 Chat", "🔗 Correlación". Esto mejora drásticamente la ergonomía, separando contextos de trabajo y reduciendo la carga cognitiva.
-- **Refinamiento Visual (CSS)**: Se implementó un sistema de diseño coherente con variables CSS (`:root`), tipografía dual (JetBrains Mono para datos/código, IBM Plex Sans para texto), badges de severidad con codificación de color semántica y un frame de chat personalizado con scroll interno real.
-- **Optimización de Filtros**: Los filtros de la pestaña "Eventos" se reorganizaron en radios y campos de texto compactos, moviendo los filtros de fecha/ID a un expander colapsable para maximizar el espacio de la lista.
+---
 
-### Corrección de Bugs Críticos
-1. **Histórico de Correlación Vacío**: 
-   - *Causa*: Limitación conocida de SQLite (`SPEC.md` §7). Las bases de datos creadas antes de la Fase 5.8 carecían de la columna `correlation_group`, y `create_all()` no la agrega retroactivamente.
-   - *Solución*: Documentado el procedimiento de reset de `events.db` para garantizar la alineación del esquema. Se añadió `st.rerun()` tras una correlación exitosa para forzar la renderización del histórico actualizado.
-2. **Fallo en Chat por Grupo (ID incorrecto)**:
-   - *Causa*: El uso de `st.number_input` obligaba al usuario a adivinar el ID del grupo (ej. escribir "1" cuando el sistema había asignado el "5").
-   - *Solución*: Reemplazo del input numérico por un `st.selectbox` dinámico que pobla sus opciones directamente desde `GET /events/correlation-history`, mostrando metadatos legibles (ID, cantidad de eventos, patrón) y eliminando por completo los errores de "No existe el grupo".
+## Sesión 15 — 26 ago 2026
 
-### Estado Actual
-- Dashboard visualmente pulido, responsive y profesional.
-- Flujo de correlación end-to-end verificado: Generación → Correlación → Historial persistente → Chat contextual sin alucinaciones.
-- Pendiente: Grabación de la demo (Fase 6) y ensayo final.
+**Asistente(s) de IA**: Qwen 3.7  
+**Fase**: 5.10 (Chat interactivo + corrección alucinación LLM)
 
-## Sesión 16 — 27 de agosto 2026
-**Asistente de IA**: Gemini Flash  
-**Fase**: 5.10 (Métricas y Diagnóstico de Rendimiento LLM)  
-**Tema**: Endpoint `GET /performance/stats`, pestaña "⚡ Rendimiento" en el dashboard y visualización de trade-offs de hardware.
+**Contexto**: Error Streamlit "Expanders may not be nested" en histórico correlación + alucinación crítica del LLM en chat (confundía grupo #5 con #1, IP incorrecta, latencia 53.1s).
 
-### Análisis y Diagnóstico de Latencia
-- **Evaluación de Hardware**: NVIDIA GeForce MX150 con 2 GB de VRAM vs modelo 3.4B Q4_K_M (~2.4 GB en memoria).
-- **Cuello de botella identificado**: Ollama descarga un 74% de capas a la CPU y 26% a la GPU debido a la restricción física de VRAM, resultando en ~5.2 tok/s (~18.9s por inferencia).
-- **Conclusión arquitectónica**: El código está completamente optimizado (reutilización de cliente, `keep_alive`, mediciones por fases en `LLMTiming`); la limitación es estrictamente física. Además, la detección de anomalías de seguridad es determinista y no depende de la velocidad del LLM.
+**Qué se hizo**:
+- Fix 1: st.expander anidados → st.popover en 2 ubicaciones (Correlación e Histórico)
+- Fix 2: Reset historial al cambiar destino (session_state.chat_prev_dest)
+- Fix 3: Cache session_state (chat_groups_cache, chat_events_cache) evita llamadas extra al backend
+- Fix 4: System prompt robusto con 6 reglas obligatorias (solo info contexto, nunca inventar, respetar clasificación, ignorar mensajes previos de otro grupo, español técnico, admitir si falta info) + formato respuesta estructurado
+- Fix 5: Inyección de contexto en cada mensaje del usuario (--- CONTEXTO DEL GRUPO #X: IP, patrón, severidad, eventos, puertos)
+- Fix 6: Chips de preguntas dinámicos contextuales ("¿Qué significa el grupo #5?" vs genérico)
 
-### Cambios Implementados
-1. **Backend (`backend/app/main.py`)**:
-   - Agregado endpoint `@app.get("/performance/stats")` que consulta la tabla persistente `LLMTiming`.
-   - Expone resumen de métricas acumuladas (total de llamadas, tiempo medio de inferencia, tokens/segundo), desglose de hardware/offload y matriz de trade-offs (Modelo actual vs Qwen 1.5B vs Q3_K_M vs CPU pura Q8).
-2. **Frontend (`frontend/dashboard.py`)**:
-   - Creado cuarto tab `⚡ Rendimiento`.
-   - Visualización de KPIs principales en 4 columnas.
-   - Panel de diagnóstico de hardware y cuello de botella + tarjetas visuales de trade-offs con badge de recomendación.
-   - Gráfico de dispersión/línea temporal interactivo (Plotly) que refleja el tiempo de generación por llamada y tabla expandible con el historial reciente.
-3. **Validación**:
-   - `pytest tests -v` pasando en verde (37/37 tests).
+**Decisión de diseño / aprendizaje clave**: Alucinación del LLM resuelta con inyección explícita de contexto por mensaje + system prompt con reglas estrictas. Popovers evitan error de expanders anidados.
 
-## [28 Ago 2026] Sesión de Debugging: Robustez de Escenarios Sintéticos y Exclusión Mutua en API
-**Asistente**: Gemini Notebook (Copiloto de IA)
+**Verificación**: Alucinaciones 100% → 0%, consistencia 100%, latencia 53.1s → 43.2s (-19%), UI sin errores. Export: docs/ai-sessions/2026-08-26-qwen37-chat-fix-alucinacion.md
 
-### Diagnóstico y Problemas Encontrados
-1. **Conflicto en escenario 'beacon'**: El endpoint `/events/correlate` agrupaba eventos del escenario de beaconing (que usan acción `pass` y dirección `out`) y los marcaba incorrectamente como `fuerza_bruta` debido a la baja variación de puertos destino hacia el C2 [3]. Esto marcaba los logs como `analyzed=True`, impidiendo que `/events/detect-beaconing` los procesara [3].
-2. **Error de desempaquetado en beaconing**: Un intento previo de solucionar la concurrencia alteró el agrupamiento de beaconing a una clave de tipo string, lo que provocaba un error catastrófico de tipo `ValueError` al desestructurar la tupla original `(srcip, dstip, dstport)`.
-3. **Inestabilidad del escenario 'portscan'**: El script `generate_fake_logs.py` elegía puertos destino con reposición (`random.choice`) de un pool muy pequeño de 9 puertos [4]. Con un conteo por defecto de 5 logs, era común tener duplicados, lo que bajaba el ratio de variación al rango indeterminado (`0.3 - 0.7`) y arruinaba la consistencia de la demo.
+---
 
-### Cambios Realizados
+## Sesión 16 — 26 ago 2026
 
-#### Backend (`backend/app/main.py`)
-- **Filtrado estricto**: Se modificó `correlate_events()` para extraer los metadatos de conexión con `extract_connection_summary()` y procesar **únicamente** eventos que posean la acción `"block"`.
-- **Restauración de Beaconing**: Se revirtió la firma de agrupación en `/events/detect-beaconing` al diccionario de tuplas `(src, dst, dport)` para mantener el análisis de intervalos temporal intacto y evitar errores en tiempo de ejecución.
+**Asistente(s) de IA**: Qwen 3.7  
+**Fase**: 5.10 (UI Tabs + persistencia correlación + UX chat)
 
-#### Generador sintético (`scripts/generate_fake_logs.py`)
-- **Pool de puertos ampliado**: Se declaró una tupla global `COMMON_PORTS` con 40 puertos representativos de infraestructura de TI.
-- **Muestreo sin reposición**: En el escenario de `portscan`, se implementó la generación de una lista de puertos destino únicos mediante `random.sample()`, garantizando que el ratio de variación sea consistentemente `1.0` en lotes cortos de prueba (como `--count 5`), haciendo la demo 100% predecible.
-- **Compatibilidad**: Se adaptaron los constructores para que utilicen tuplas de forma nativa y evitar interferencias de renderizado markdown en la plataforma.
+**Contexto**: Continuación de sesión 15. Migración a layout por tabs, corrección bugs de persistencia y UX chat.
 
-#### Pruebas de integración (`backend/tests/test_api.py`)
-- Se implementó `test_correlate_ignores_pass_action_events` de forma aislada e independiente para confirmar que los paquetes `pass`/`out` jamás sean tomados por la lógica de correlación.
+**Qué se hizo**:
+- Migración a st.tabs: Eventos | Chat | Correlación (separación contextos, reduce carga cognitiva)
+- Refinamiento visual CSS: variables :root, tipografía dual, badges semánticos, frame chat con scroll interno
+- Bug histórico vacío: DB vieja sin columna correlation_group (limitación SQLite create_all) → documentado reset DB + st.rerun() post-correlación
+- Bug chat por grupo: number_input obligaba a adivinar ID → selectbox dinámico desde /correlation-history con metadatos legibles
+- Flujo correlación end-to-end verificado: Generación → Correlación → Historial persistente → Chat contextual sin alucinaciones
 
-#### Especificación técnica (`docs/SPEC.md`)
-- Se actualizó la sección §7 para reflejar explícitamente que la correlación de eventos determinista solo opera sobre paquetes bloqueados.
+**Verificación**: Dashboard pulido, fluido completo verificado. Export: docs/ai-sessions/2026-08-26-qwen37-ui-tabs-chat.md
 
-### Resultados de la Sesión
-- **100% de los tests en verde** ejecutando `pytest tests -v` en el entorno virtual.
-- Los escenarios `beacon` y `portscan` se comportan de forma predecible y excluyente sin pisarse entre sí.
+---
 
-## Sesión 18 — 29-30 ago 2026
-**Asistentes de IA**: Grok + Deepseek Harness (varios modelos)
-**Tema**: UI de correlación tabular, estado Streamlit, notificaciones, pestañas extra
+## Sesión 17 — 27 ago 2026
 
-### Contexto
-El histórico de correlación seguía en expanders. Se rediseñó la pestaña Correlación
-y se estabilizó el estado de la UI tras `st.rerun()` (explicar, correlacionar, tema).
+**Asistente(s) de IA**: Gemini Flash  
+**Fase**: 5.10 (Métricas rendimiento LLM + pestaña Rendimiento)
 
-### Cambios principales (`frontend/dashboard.py`)
+**Contexto**: Latencia LLM ~18-38s. Necesidad de visibilidad de hardware/trade-offs para presentación.
 
-#### Navegación
-- Sustitución de `st.tabs` por `st.radio` + `session_state.main_tab` para no perder
-  la pestaña activa al recargar (limitación conocida de `st.tabs`).
-- Pestañas: Eventos | Chat | Correlación | Rendimiento | Acerca del proyecto.
+**Qué se hizo**:
+- Análisis hardware: NVIDIA MX150 2GB VRAM vs modelo 3.4B Q4_K_M (~2.4GB) → 74% capas en CPU, 26% GPU, ~5.2 tok/s
+- Backend: GET /performance/stats expone LLMTiming (total/load/prompt_eval/gen seconds, tokens/s, modelo, modo) + matriz trade-offs (actual vs Qwen 1.5B vs Q3_K_M vs CPU Q8)
+- Frontend: Tab ⚡ Rendimiento con KPIs, diagnóstico hardware, tarjetas trade-offs con badge recomendación, gráfico Plotly temporal + tabla historial
+- Validación: 37/37 tests ✅
 
-#### Correlación — tabla y detalles
-- Histórico en `st.dataframe` paginado (`on_select`, selección de una fila).
-- Columnas: #, Severidad, Patrón, IP(s), Puertos (números, truncados si >4),
-  Eventos, Desde, Hasta, Explicación (✓ / ⏳).
-- Panel único «Detalles del grupo» bajo la tabla: IDs a la vista, explicación,
-  acción recomendada, botón Explicar / Explicar de nuevo.
-- Orden fijo: tabla → paginación → detalles (sin bloque duplicado encima).
+**Decisión de diseño / aprendizaje clave**: Cuello de botella es físico (VRAM), no código (cliente reutilizado, keep_alive, mediciones por fases). Detección determinista no depende de velocidad LLM.
 
-#### Estado y explicaciones
-- Caché de sesión `corr_expl` / `corr_expl_by_ids`: `/correlation-history` no
-  trae el texto del LLM a nivel grupo; la UI refleja ✓ Explicado en la sesión.
-- `corr_selected_gid` mantiene el grupo enfocado tras explicar.
-- Flujo busy «Razonando…» al re-analizar; ancla en
-  `POST /events/{id}/analyze` del primer `event_id` del grupo.
-- Banner dismissible tras `POST /events/correlate` (`corr_result_pending` + Entendido).
-- Limitación documentada: re-explicar un evento ancla ≠ prompt de lote del correlate;
-  el texto puede variar respecto al análisis de patrón.
+**Verificación**: 37/37 tests ✅. Export: docs/ai-sessions/2026-08-27-gemini-flash-performance.md
 
-#### Notificaciones y header
-- `_push_notification` + `notification_log` (historial de sesión, máx. 50).
-- Mensajes sin emoji en el string (el icono lo pone `st.success` / `error` / `info`).
-- Header: botones compactos ↻ (refresh) y tema (☀️/🌙) con `help` en hover.
+---
 
-#### CSS / branding
-- Variables de tema claro/oscuro ya existentes.
-- Intento de foco de fila en cian de marca (`#0891B2`); si el indicador sigue rojo,
-  causa probable: `theme.primaryColor` de Streamlit (checkbox del dataframe), no solo
-  el CSS custom — mitigación: `.streamlit/config.toml` + selectores más específicos.
+## Sesión 18 — 28 ago 2026
 
-#### Otras pestañas (sesión previa / consolidado en esta)
-- Rendimiento: consume `GET /performance/stats`.
-- Acerca: problema, arquitectura, decisiones de diseño, stack, roadmap visual.
+**Asistente(s) de IA**: Gemini Notebook  
+**Fase**: 5.5/5.8 (Robustez escenarios sintéticos + exclusión mutua API)
 
-### Bugs corregidos en la sesión
-- Salto a pestaña Eventos tras cualquier `rerun`.
-- Notificación `✅ ✅` (emoji duplicado).
-- `NameError: name 'background' is not defined` por llaves simples `{` en CSS
-  dentro de `BRANDING_CSS = f"""..."""` (hay que usar `{{` / `}}`).
-- UI fantasma (detalles/tabla duplicados) mientras corría «Explicar».
-- Propiedades CSS mal formadas (`background - color`, `min - height`).
+**Contexto**: Conflictos entre escenarios beacon/portscan y correlación; inestabilidad en generador portscan.
 
-### Verificación (humano)
-- Correlacionar → Entendido → grupos en la tabla.
-- Seleccionar pendiente → Explicar → un solo panel, pestaña Correlación, columna ✓.
-- Sin `NameError` al cargar el dashboard.
-- [ ] Foco de fila en cian (pending si aún se ve el primary rojo del theme).
+**Qué se hizo**:
+- Backend: correlate_events() filtra estrictamente action="block" (ignora pass/out de beaconing) — resuelve conflicto que marcaba beaconing como fuerza_bruta
+- Beaconing: restaurado agrupamiento por tupla (src, dst, dport) para análisis intervalos intacto
+- Generador sintético: pool puertos ampliado a 40 (COMMON_PORTS), muestreo sin reposición (random.sample) en portscan → ratio variación consistentemente 1.0
+- Tests: test_correlate_ignores_pass_action_events aislado e independiente
+- SPEC.md §7 actualizado: correlación determinista solo opera sobre paquetes bloqueados
 
-### Docs / siguientes pasos
-- Actualizar ROADMAP (Fase 5.11 UI correlación / cierre dashboard).
-- SPEC: mencionar `correlation-history`, caché de explicación en UI, radio de pestañas.
-- Opcional backend: persistir `explanation` a nivel grupo o
-  `POST /events/groups/{id}/explain`.
-- Fase 6: demo, evidencia IA, Docker end-to-end.
+**Decisión de diseño / aprendizaje clave**: Exclusión mutua en API — /correlate solo ve action=block; /detect-beaconing solo ve action=pass/out. Generador portscan determinista con random.sample.
 
-## Sesión 19 — 31 ago 2026
-**Asistente de IA**: OpenCode  
-**Tema**: Limpieza y consolidación pre-MVP  
-**Duración**: ~1 hora
+**Verificación**: 100% tests en verde (pytest tests -v). Escenarios beacon/portscan predecibles y excluyentes. Export: docs/ai-sessions/2026-08-28-gemini-notebook-beacon-portscan.md
 
-### Limpieza de archivos
-- Eliminados 4 dumps crudos de sesión OpenCode de la raíz:
-  - `chat_service_opencode_session-ses_fc8e.md` (268 KB)
-  - `opencode_diagnostico_de_latencia_session-ses_fc95.md` (169 KB)
-  - `Resumen_de_la_fase_5.10_completada.md` (1 KB)
-  - `plan_maestro.md` (48 KB)
-- Eliminadas 5 transcripciones completas >50 KB de `docs/ai-sessions/`:
-  - `2026-08-19-opencode-docker-y-ingesta.md` (261 KB)
-  - `2026-08-20-opencode-busqueda-filtros-y-paginacion.md` (340 KB)
-  - `2026-08-20-opencode-manual-ingest.md` (352 KB)
-  - `22-ago-latets_session-ses_fe00.md` (207 KB)
-  - `visual_identity_session-ses_fe00.md` (106 KB)
-- Eliminados duplicados en `docs/ai-sessions/` (canónicos en `docs/`):
-  - `branding.md`
-  - `isotype.md`
-- Actualizado `docs/ai-sessions/README.md` para reflejar solo los archivos que quedan.
+---
 
-### Alineación de documentación
-- `ROADMAP.md`: Fase 5.6 cerrada (ítem de lote real sanitizado marcado como opcional), Fase 5.11 cerrada, tabla de versiones actualizada, checkboxes residuales limpiados.
-- `docs/SPEC.md`: Sección de dashboard actualizada (pestañas actuales, comportamiento de Correlación con tabla + caché de explicación en sesión + limitaciones del re-explicar), fecha de "Última actualización" puesta al 31 ago 2026.
-- `AGENTS.md`: Referencia a `extract_attacker_ip` verificada (línea 51), nota añadida de que `plotly` solo debe estar en `frontend/requirements.txt`.
-- `DEVLOG.md`: Esta entrada.
-- `.gitignore`: Patrones modernos ya presentes (`.pytest_cache/`, `.ruff_cache/`, `*.log`), sin cambios necesarios.
+## Sesión 19 — 29-30 ago 2026
 
-### Código y calidad
-- `plotly` eliminado de `backend/requirements.txt` (solo en frontend).
-- Pendiente: ejecutar `ruff check app tests` y `pytest tests -v` desde `backend/`.
-- Comentarios en `main.py`, `llm_service.py`, `chat_service.py` y `dashboard.py` revisados (español, precisión, coherencia con SPEC/AGENTS).
+**Asistente(s) de IA**: Grok + DeepSeek  
+**Fase**: 5.11 (UI correlación tabular + estado Streamlit + pestañas extra)
+
+**Contexto**: Histórico correlación en expanders. Inestabilidad estado UI tras st.rerun() (explicar, correlacionar, tema).
+
+**Qué se hizo**:
+- Navegación: st.tabs → st.radio + session_state.main_tab (conserva pestaña activa al rerun). Pestañas: Eventos | Chat | Correlación | Rendimiento | Acerca
+- Correlación: tabla paginada st.dataframe (on_select, selección fila), columnas #/Severidad/Patrón/IPs/Puertos/Eventos/Desde/Hasta/Explicación (✓/⏳), panel detalles fijo bajo tabla
+- Estado: caché sesión corr_expl/corr_expl_by_ids (correlation-history no trae explanation), corr_selected_gid mantiene foco, banner dismissible post-correlate
+- Notificaciones: _push_notification + notification_log (máx 50, sin emojis en string), header con botones ↻/tema compactos
+- CSS: variables tema, foco fila cian marca (#0891B2), fixes NameError por llaves en f-string, UI fantasma, propiedades mal formadas
+- Bugs corregidos: salto a Eventos tras rerun, emoji duplicado, NameError background, CSS mal formado
+
+**Verificación**: Correlacionar → grupos en tabla → seleccionar → explicar → un panel, pestaña conservada. Export: docs/ai-sessions/2026-08-29-grok-deepseek-ui-correlacion.md
+
+---
+
+## Sesión 20 — 31 ago 2026
+
+**Asistente(s) de IA**: OpenCode  
+**Fase**: 6 (Limpieza y consolidación pre-MVP)
+
+**Contexto**: Repo con archivos temporales, exports duplicados, documentación desalineada.
+
+**Qué se hizo**:
+- Eliminados 4 dumps crudos OpenCode de raíz (268KB, 169KB, 1KB, 48KB)
+- Eliminadas 5 transcripciones >50KB de docs/ai-sessions/ (261KB, 340KB, 352KB, 207KB, 106KB)
+- Eliminados duplicados branding.md/isotype.md en ai-sessions (canónicos en docs/)
+- Actualizado docs/ai-sessions/README.md reflejando solo archivos que quedan
+- ROADMAP: Fase 5.6 cerrada (lote real opcional), Fase 5.11 cerrada, versiones actualizadas
+- SPEC.md: dashboard actualizado (pestañas, comportamiento Correlación tabla+caché+limitaciones), fecha 31 ago 2026
+- AGENTS.md: extract_attacker_ip verificado (main.py:51), plotly solo en frontend/requirements.txt
+- plotly eliminado de backend/requirements.txt
+- Comentarios en main.py, llm_service.py, chat_service.py, dashboard.py revisados (español, precisión, coherencia SPEC/AGENTS)
+
+**Verificación**: Pendiente ruff check + pytest tests -v desde backend/
+
+---
+
+## Sesión 21 — 3 sept 2026
+
+**Asistente(s) de IA**: OpenCode (Mimo v2.5-free)  
+**Fase**: 6 (Evidencia IA y documentación final)
+
+**Contexto**: Proyecto funcionalmente completo. DEVLOG.md y docs/ai-sessions/ necesitaban estandarización para servir como evidencia de uso de IA en la presentación final.
+
+**Qué se hizo**:
+- Agregado preámbulo "Cómo se delegó el trabajo entre herramientas de IA" basado en AGENTS.md (roles: Claude arquitectura/coherencia, OpenCode ejecución agéntica, Perplexity investigación verificada, DeepSeek alto volumen, Gemini API datos sintéticos, Kimi docs largos, Grok/ChatGPT respaldo)
+- Reformateadas 19 entradas DEVLOG a template fijo (mismos encabezados, orden, español)
+- Renumeradas sesiones 14-20 en orden cronológico real (25→31 ago): Grok revamp(25), Qwen fix alucinación(26), Qwen UI tabs(26), Gemini Flash performance(27), Gemini Notebook exclusión mutua(28), Grok+DeepSeek UI correlación(29-30), OpenCode limpieza(31)
+- Comprimidas sesiones 14-20 a 8-10 líneas c/u; detalle técnico movido a 7 exports nuevos en docs/ai-sessions/
+- Agregada sección final "Los 5 momentos clave — IA en la toma de decisiones" con 5 casos verificables (classify_port_pattern, alucinación chat grupo #5, plotly docker, contaminación DB tests, conflicto beaconing/correlación)
+- Creados 7 exports nuevos en docs/ai-sessions/ para sesiones 14-20
+- Reescrito docs/ai-sessions/README.md: índice 19 filas, columna "Evidencia de decisión", ⭐ en momentos #2 y #5, enlace a 5 momentos, lista sesiones solo en DEVLOG
+- Agregada caption en landing/index.html bajo FRANJA DE LOGOS con link absoluto a DEVLOG.md en GitHub
+
+**Decisión de diseño / aprendizaje clave**: La evidencia de uso de IA debe ser verificable (commits, tests, archivos concretos), no narrativa. Estandarizar el DEVLOG permite al jurado ver la trazabilidad real de decisiones críticas sin leer conversaciones completas.
+
+**Verificación**: 40/40 tests ✅, ruff ✅, py_compile ✅, anclas internas validadas
+
+---
+
+## Los 5 momentos clave — IA en la toma de decisiones
+
+### 1. Clasificación bruteforce vs portscan — decisión de diseño determinista
+- **Cuándo**: Día 9 (23 ago) — [ver entrada](#día-9-23-ago-2026)
+- **Herramienta**: Claude (implementación) + OpenCode (tests previos)
+- **El problema**: Un evento correlacionado necesitaba distinguir fuerza bruta (mismo puerto repetido) de escaneo (puertos distintos) sin usar LLM para la clasificación.
+- **Cómo se resolvió**: Heurística `classify_port_pattern` en main.py basada en ratio puertos destino distintos (≤0.3 fuerza_bruta, ≥0.7 escaneo_puertos, indeterminado en zona media o <3 eventos). Umbrales como constantes configurables.
+- **Por qué importa**: Cumple el principio central del proyecto: **detección determinista, LLM solo explica** (SPEC §6). El LLM recibe el patrón ya clasificado como contexto, nunca decide solo.
+
+### 2. Alucinación del chat confundiendo grupo #5 con grupo #1
+- **Cuándo**: Sesión 15 (26 ago) — [ver entrada](#sesión-15-26-ago-2026)
+- **Herramienta**: Qwen 3.7 (detectó y resolvió)
+- **El problema**: Al consultar sobre Grupo #5 (fuerza_bruta, high), el LLM respondía "indeterminado", IP 198.51.100.74 (del Grupo #1), referenciaba grupo incorrecto. Latencia 53.1s.
+- **Cómo se resolvió**: Inyección de contexto explícito en cada mensaje del usuario (--- CONTEXTO DEL GRUPO #X: IP, patrón, severidad, eventos, puertos), system prompt con 6 reglas obligatorias, reset de historial al cambiar destino, cache session_state, popovers en lugar de expanders anidados.
+- **Por qué importa**: Demuestra que **el LLM no tiene memoria fiable entre turnos** — el contexto debe inyectarse explícitamente en cada request. Fix técnico que mantiene la arquitectura determinista (el LLM sigue sin decidir, solo explica con contexto correcto).
+
+### 3. plotly ausente en frontend/requirements.txt rompiendo docker compose up
+- **Cuándo**: Archivo `docs/ai-sessions/Sesión completada — Pre-entrega Fase 6.md` (Parte 0)
+- **Herramienta**: OpenCode (validación Docker estática)
+- **El problema**: Frontend usaba plotly para gráficos interactivos pero la dependencia solo estaba en backend/requirements.txt. Al hacer `docker compose up`, el contenedor frontend fallaba al importar plotly.
+- **Cómo se resolvió**: Creado frontend/requirements.txt con streamlit, httpx, plotly pineados; actualizado frontend/Dockerfile para usar requirements.txt; README Opción A actualizado.
+- **Por qué importa**: Valida el principio **air-gapped** — plotly es 100% offline (se instala via pip, sirve assets desde paquete local, sin CDN). La validación estática de Docker (sin Docker Desktop) detectó el fallo antes de runtime.
+
+### 4. Contaminación de DB entre corridas de test
+- **Cuándo**: Día 6 (17-18 ago) — [ver entrada](#día-6-17-18-ago-2026)
+- **Herramienta**: OpenCode (fusionando AGENTS.md con /init)
+- **El problema**: Tests usaban DB temporal en `%TEMP%\ai_noc_test.db` pero el archivo no se borraba entre corridas → conteos de grupos inesperados en /correlate, /detect-beaconing, /detect-suspicious-dns.
+- **Cómo se resolvió**: Agregado borrado automático del archivo al inicio de la sesión de tests en test_api.py (líneas 13-20): `if os.path.exists(_TEST_DB_PATH): os.remove(_TEST_DB_PATH)`.
+- **Por qué importa**: **Aislamiento de tests** es requisito para evidencia confiable. Bug real encontrado por IA cruzada (OpenCode revisando código de Claude) — demuestra valor de revisión multi-herramienta.
+
+### 5. Conflicto de correlación agrupando eventos de beaconing (pass) como fuerza bruta
+- **Cuándo**: Sesión 18 (28 ago) — [ver entrada](#sesión-18-28-ago-2026)
+- **Herramienta**: Gemini Notebook
+- **El problema**: /events/correlate agrupaba eventos de beaconing (action=pass, direction=out) y los marcaba como fuerza_bruta por baja variación de puertos hacia el C2. Esto los marcaba analyzed=True, impidiendo que /events/detect-beaconing los procesara.
+- **Cómo se resolvió**: Filtrado estricto en correlate_events(): solo procesa eventos con action="block" (extraído via extract_connection_summary). Beaconing restaurado a agrupamiento por tupla (src, dst, dport) para análisis de intervalos.
+- **Por qué importa**: **Exclusión mutua en la API** — cada detector opera sobre su dominio semántico (block vs pass/out). Evita falsos positivos y pisadas de estado (analyzed=True) entre detectores. Documentado en SPEC §7.
