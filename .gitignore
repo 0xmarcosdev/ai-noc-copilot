@@ -13,3 +13,4 @@ venv/
 .DS_Store
 docs/ai-sessions/*session*.md   # o un patrón más amplio si querés
 ai-noc-slides/*
+scripts/out/
