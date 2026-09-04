@@ -23,7 +23,6 @@ services:
       - "8000:8000"
       - "5514:5514/udp"
     volumes:
-      - ./backend/app:/app/app
       - backend_data:/app/data
     environment:
       - OLLAMA_HOST=http://host.docker.internal:11434

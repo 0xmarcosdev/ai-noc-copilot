@@ -186,7 +186,6 @@ def performance_stats():
 
     from sqlmodel import func, select
 
-
     with Session(engine) as session:
         timings = session.exec(select(LLMTiming).order_by(LLMTiming.timestamp.desc()).limit(100)).all()
         total_calls = session.exec(select(func.count(LLMTiming.id))).one()

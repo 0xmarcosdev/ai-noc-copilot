@@ -2093,7 +2093,7 @@ Administrador de red de una empresa con arquitectura hub-and-spoke (sucursales c
 
     # ── Sección: Arquitectura ──
     st.markdown("#### Arquitectura")
-    arch_img_path = os.path.join(os.path.dirname(__file__), "ai-noc-slides", "diagrams", "arquitectura.svg")
+    arch_img_path = os.path.join(os.path.dirname(__file__), "static", "arquitectura.svg")
     try:
         with open(arch_img_path, "r", encoding="utf-8") as f:
             svg_content = f.read()

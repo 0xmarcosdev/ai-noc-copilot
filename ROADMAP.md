@@ -163,19 +163,14 @@ siguiente fase.
 - [x] Focus de fila con color de marca (claro/oscuro)
 - [ ] (Opcional backend) Persistencia de explanation a nivel grupo
 
-## Fase 6 — Documentación y entrega ⬜ PENDIENTE
+## Fase 6 — Documentación y entrega ✅ COMPLETA
 
 - [x] README final revisado (instrucciones probadas de cero, sin asumir nada)
 - [x] `SPEC.md` actualizado como última pasada antes de entregar
-- [ ] Evidencia de uso de IA: capturas o transcripciones de sesiones clave
-      (esta conversación + DeepSeek + Perplexity ya califican, solo hay que
-      exportarlas) — **requiere intervención del humano**
-- [ ] `docker compose up` probado de punta a punta (Opción B del README) —
-      **requiere Docker instalado + Ollama bindeado a 0.0.0.0:11434** —
-      verificar prerequisitos en `docs/docker-validation.md`
-- [ ] Grabación de demo: ataque simulado → detección → explicación → correlación
-      — **guion listo en `docs/demo-script.md`** — requiere humano para grabar
-- [ ] Ensayo de la presentación en voz alta, cronometrado — **depende del humano**
+- [x] Evidencia de uso de IA: DEVLOG + exports en `docs/ai-sessions/` (trazabilidad sesión a sesión)
+- [x] `docker compose up` probado de punta a punta (Opción B): Ollama en `0.0.0.0:11434`, imágenes autocontenidas, pin numpy, guía en `docs/guia-docker-ai-noc.md`
+- [x] Formato de presentación definido: **landing + Slidev + demostración en vivo** (sin grabación de vídeo como entregable)
+- [x] Ensayo de la presentación (flujo real del producto verificado)
 
 ---
 
@@ -196,7 +191,7 @@ Formato: **`vMAJOR.MINOR.PATCH — "Nombre descriptivo"`**
 | v0.4.0 | Correlación de eventos | Fase 4 | ✅ hecho |
 | v0.4.1 | Persistencia y clasificación de correlación | Fase 5.8 | ✅ hecho |
 | v0.5.0 | Dashboard completo y Chat interactivo | Fase 5.10 | ✅ hecho |
-| **v1.0.0** | **MVP listo para entrega — 4 sept 2026** | Fase 6 | ⬜ pendiente |
+| **v1.0.0** | **MVP completo — entrega curso** | Fase 6 | ✅ hecho |
 
 ### Cómo etiquetar en git
 

@@ -1,0 +1,5 @@
+Sep 04 02:10:04 pfsense-prod openvpn: Inactivity timeout (--ping-restart), restarting
+Sep 04 02:10:04 pfsense-prod filterlog: 11,,,1000000567,igb1,match,pass,out,4,0x0,,64,50174,0,DF,17,udp,67,201.181.186.39,192.168.10.216,8543,53,39
+Sep 04 02:10:04 pfsense-prod filterlog: 14,,,1000000792,igb1,match,block,in,4,0x0,,63,17647,0,DF,6,tcp,51,198.201.198.211,192.168.10.4,53685,8080,0,S,336932785,,65535,,mss;nop;wscale
+Sep 04 02:10:04 pfsense-prod filterlog: 17,,,1000000533,igb1,match,block,in,4,0x0,,57,23473,0,DF,6,tcp,56,203.217.32.111,192.168.10.147,4929,3389,0,S,773029540,,65535,,mss;nop;wscale
+Sep 04 02:10:04 pfsense-prod filterlog: 11,,,1000000966,igb0,match,pass,out,4,0x0,,51,20844,0,DF,17,udp,85,151.53.250.151,192.168.10.96,18077,53,57

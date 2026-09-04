@@ -1,0 +1,5 @@
+Sep 04 01:45:20 pfsense-prod filterlog: 6,,,1000000379,igb1,match,block,in,4,0x0,,62,57408,0,DF,6,tcp,48,198.51.100.90,192.168.10.8,2569,9200,0,S,732256636,,65535,,mss;nop;wscale
+Sep 04 01:45:20 pfsense-prod filterlog: 4,,,1000000437,em0,match,block,in,4,0x0,,49,43757,0,DF,6,tcp,40,198.51.100.90,192.168.10.8,38401,5060,0,S,472210135,,65535,,mss;nop;wscale
+Sep 04 01:45:20 pfsense-prod filterlog: 4,,,1000000408,em0,match,block,in,4,0x0,,52,26293,0,DF,6,tcp,40,198.51.100.90,192.168.10.8,52022,23,0,S,669029216,,65535,,mss;nop;wscale
+Sep 04 01:45:20 pfsense-prod filterlog: 18,,,1000000469,igb1,match,block,in,4,0x0,,60,11254,0,DF,6,tcp,49,198.51.100.90,192.168.10.8,51783,143,0,S,681267927,,65535,,mss;nop;wscale
+Sep 04 01:45:20 pfsense-prod filterlog: 19,,,1000000544,em0,match,block,in,4,0x0,,58,24010,0,DF,6,tcp,54,198.51.100.90,192.168.10.8,12104,10000,0,S,444258676,,65535,,mss;nop;wscale
